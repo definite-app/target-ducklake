@@ -36,6 +36,7 @@ Supports append, merge, and overwrite load methods (default is merge). The load 
 | `partition_fields` | object | ❌ | - | Object mapping stream names to arrays of partition column definitions. Each stream key maps directly to an array of column definitions |
 | `auto_cast_timestamps` | boolean | ❌ | `false` | When True, automatically attempts to cast timestamp-like fields to timestamp types in ducklake |
 | `sanitize_timezones` | boolean | ❌ | follows `auto_cast_timestamps` | Normalize timezone-aware values and UTC±HH:MM strings before Arrow ingestion |
+| `sanitize_dates` | boolean | ❌ | `false` | Normalize date and datetime-like strings to ISO-8601 before ingestion |
 | `dates_to_varchar` | boolean | ❌ | `false` | Force timestamp-like columns to VARCHAR to avoid timezone and formatting issues |
 | `dates_to_varchar_streams` | array | ❌ | - | List of stream names whose timestamp-like columns should be coerced to VARCHAR |
 | `dates_to_varchar_columns` | object | ❌ | - | Mapping of stream name to explicit column names to coerce to VARCHAR |
@@ -70,6 +71,7 @@ plugins:
         fallback_dir: ${MELTANO_PROJECT_ROOT}/.ducklake/_failed_batches # Optional override
         fallback_include_payload: true # Optional - also write raw Singer payloads
         sanitize_timezones: true # Optional - normalize UTC±HH:MM style strings
+        sanitize_dates: true # Optional - rewrite non-ISO date strings
         dates_to_varchar: true # Optional - force timestamp-like columns to VARCHAR
 ```
 
@@ -84,9 +86,10 @@ When `fallback_on_insert_error` is enabled, each failing batch is quarantined to
   `fallback_include_payload`).
 
 `sanitize_timezones` converts timezone-aware Python datetimes and `UTC±HH:MM`
-style strings to UTC-naive ISO strings before Arrow ingestion. The
-`dates_to_varchar*` settings coerce timestamp-like columns to VARCHAR so DuckDB
-never has to parse problematic formats. Each coerced column increments the
+style strings to UTC-naive ISO strings before Arrow ingestion. `sanitize_dates`
+normalizes slash-separated or other non-ISO date strings to ISO-8601 before Arrow
+ingestion. The `dates_to_varchar*` settings coerce timestamp-like columns to VARCHAR
+so DuckDB never has to parse problematic formats. Each coerced column increments the
 `target_ducklake_dates_to_varchar_columns_total{stream}` metric, while each
 quarantined batch increments
 `target_ducklake_fallback_batches_total{stream}`.

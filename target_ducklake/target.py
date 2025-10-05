@@ -62,6 +62,7 @@ class Targetducklake(Target):
             "fallback_include_payload",
             "advance_state_on_fallback",
             "sanitize_timezones",
+            "sanitize_dates",
             "dates_to_varchar",
         )
         for key in bool_keys:
@@ -70,6 +71,8 @@ class Targetducklake(Target):
 
         if "sanitize_timezones" not in config:
             config["sanitize_timezones"] = config.get("auto_cast_timestamps", False)
+        if "sanitize_dates" not in config:
+            config["sanitize_dates"] = False
         return config
 
     config_jsonschema = th.PropertiesList(
@@ -246,6 +249,16 @@ class Targetducklake(Target):
             description=(
                 "Normalize timezone-aware values and UTC±HH:MM strings to UTC-naive timestamps"
                 " prior to Arrow ingestion. Defaults to the value of auto_cast_timestamps."
+            ),
+        ),
+        th.Property(
+            "sanitize_dates",
+            th.BooleanType(),
+            default=False,
+            title="Sanitize Date Strings",
+            description=(
+                "Normalize date and datetime-like strings to ISO-8601 so Arrow and DuckLake "
+                "ingest them consistently."
             ),
         ),
         th.Property(

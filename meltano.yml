@@ -141,6 +141,12 @@ plugins:
       label: Sanitize Timezones
       description: Normalize timezone-aware values and UTC±HH:MM strings before Arrow ingestion. Defaults to auto_cast_timestamps when unset.
 
+    - name: sanitize_dates
+      kind: boolean
+      label: Sanitize Dates
+      description: Normalize date and datetime-like strings to ISO-8601 before ingestion.
+      default: false
+
     - name: validate_records
       kind: boolean
       label: Validate Records

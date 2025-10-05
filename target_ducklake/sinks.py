@@ -9,13 +9,14 @@ import re
 import shutil
 import traceback
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 import pyarrow.parquet as pq
+from dateutil import parser as date_parser
 from singer_sdk import Target
 
 # from singer_sdk.connectors import SQLConnector
@@ -34,6 +35,7 @@ from target_ducklake.parquet_utils import (
 )
 
 UTC_OFFSET_PATTERN = re.compile(r"^(?P<prefix>.+?)\s*UTC(?P<offset>[+-]\d{2}:\d{2})$")
+DATE_CANDIDATE_PATTERN = re.compile(r"\d{1,4}[-/]\d{1,2}[-/]\d{1,4}")
 DEFAULT_TIMESTAMP_GLOBS = ("*_at", "*_time", "*timestamp*", "*_date")
 FALLBACK_PARQUET_FILENAME = "batch.parquet"
 FALLBACK_META_FILENAME = "meta.json"
@@ -74,6 +76,7 @@ class ducklakeSink(BatchSink):
         self.sanitize_timezones = self.config.get(
             "sanitize_timezones", self.auto_cast_timestamps
         )
+        self.sanitize_dates = self.config.get("sanitize_dates", False)
 
         self.dates_to_varchar_enabled = self.config.get("dates_to_varchar", False)
         streams_cfg = self.config.get("dates_to_varchar_streams", []) or []
@@ -88,6 +91,7 @@ class ducklakeSink(BatchSink):
         self._varchar_columns: set[str] = set()
         self._columns_warned_for_varchar: set[str] = set()
         self._tz_warning_emitted = False
+        self._date_warning_emitted: set[str] = set()
         self._emitted_metrics: list[tuple[str, dict[str, Any]]] = []
 
         # NOTE: we probably don't need all this logging, but useful for debugging while target is in development
@@ -269,9 +273,9 @@ class ducklakeSink(BatchSink):
             self._columns_warned_for_varchar.add(column_name)
 
     def _sanitize_records(self, records: list[dict[str, Any]]) -> None:
-        """Normalize timezone information in-place for the provided records."""
+        """Normalize timezone and date values in-place for the provided records."""
 
-        if not self.sanitize_timezones:
+        if not (self.sanitize_timezones or self.sanitize_dates):
             return
 
         for record in records:
@@ -280,26 +284,35 @@ class ducklakeSink(BatchSink):
                 record[key] = sanitized
 
     def _sanitize_value(self, value: Any, column_name: str) -> Any:
-        """Sanitize a single field value for timezone anomalies."""
+        """Sanitize a single field value for timezone and date anomalies."""
 
         if isinstance(value, datetime):
             if value.tzinfo is not None:
-                sanitized = value.astimezone(timezone.utc).replace(tzinfo=None)
-                return sanitized.isoformat()
+                sanitized_dt = value.astimezone(timezone.utc).replace(tzinfo=None)
+                return sanitized_dt.isoformat()
+            if self.sanitize_dates:
+                return value.isoformat()
             return value
 
         if isinstance(value, str):
-            normalized = self._normalize_non_iana_timezone(value)
-            if normalized is not None:
-                if not self._tz_warning_emitted:
-                    self.logger.warning(
-                        "Non-IANA timezone detected in stream %s (column %s) with sample '%s'; coercing to UTC",
-                        self.stream_name,
-                        column_name,
-                        value,
-                    )
-                    self._tz_warning_emitted = True
-                return normalized
+            sanitized_str = value
+            if self.sanitize_timezones:
+                normalized = self._normalize_non_iana_timezone(sanitized_str)
+                if normalized is not None:
+                    if not self._tz_warning_emitted:
+                        self.logger.warning(
+                            "Non-IANA timezone detected in stream %s (column %s) with sample '%s'; coercing to UTC",
+                            self.stream_name,
+                            column_name,
+                            value,
+                        )
+                        self._tz_warning_emitted = True
+                    sanitized_str = normalized
+            if self.sanitize_dates:
+                normalized_date = self._normalize_date_string(sanitized_str, column_name)
+                if normalized_date is not None:
+                    sanitized_str = normalized_date
+            return sanitized_str
 
         return value
 
@@ -323,6 +336,57 @@ class ducklakeSink(BatchSink):
 
         normalized = parsed.astimezone(timezone.utc).replace(tzinfo=None)
         return normalized.isoformat()
+
+    def _normalize_date_string(self, value: str, column_name: str) -> str | None:
+        """Normalize common date strings to ISO-8601 for Arrow compatibility."""
+
+        candidate = value.strip()
+        if not candidate or not any(char.isdigit() for char in candidate):
+            return None
+
+        if not (DATE_CANDIDATE_PATTERN.search(candidate) or "T" in candidate or ":" in candidate):
+            return None
+
+        try:
+            parsed = date_parser.parse(candidate)
+        except (ValueError, OverflowError, TypeError):
+            return None
+
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+        normalized = self._format_normalized_datetime(candidate, parsed)
+        if normalized == value:
+            return None
+
+        if column_name not in self._date_warning_emitted:
+            self.logger.warning(
+                "Non-ISO date detected in stream %s (column %s) with sample '%s'; normalizing to %s",
+                self.stream_name,
+                column_name,
+                value,
+                normalized,
+            )
+            self._date_warning_emitted.add(column_name)
+
+        return normalized
+
+    def _format_normalized_datetime(self, original: str, parsed: datetime) -> str:
+        """Format a parsed datetime into date-only or datetime ISO-8601 string."""
+
+        is_date_only = self._looks_like_date_only(original)
+        if is_date_only and parsed.time() == time(0, 0, 0) and parsed.microsecond == 0:
+            return parsed.date().isoformat()
+        return parsed.isoformat()
+
+    @staticmethod
+    def _looks_like_date_only(value: str) -> bool:
+        """Heuristically determine if the original string was a date without time."""
+
+        lowered = value.lower()
+        if "t" in lowered or ":" in lowered:
+            return False
+        return any(sep in lowered for sep in ("-", "/", ".")) and len(lowered) <= 12
 
     def _coerce_records_to_varchar(self, records: list[dict[str, Any]]) -> None:
         """Ensure configured VARCHAR columns contain string values."""
@@ -387,6 +451,7 @@ class ducklakeSink(BatchSink):
                 "advance_state_on_fallback": self.advance_state_on_fallback,
                 "fallback_include_payload": self.fallback_include_payload,
                 "sanitize_timezones": self.sanitize_timezones,
+                "sanitize_dates": self.sanitize_dates,
                 "dates_to_varchar": self.dates_to_varchar_enabled,
             },
         }

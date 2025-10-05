@@ -109,6 +109,7 @@ class TestTargetducklakeConfig:
         assert target.config["max_batch_size"] == 10000
         assert target.config["auto_cast_timestamps"] == False
         assert target.config["sanitize_timezones"] == False
+        assert target.config["sanitize_dates"] == False
         assert target.config["fallback_on_insert_error"] == False
         assert target.config["fallback_include_payload"] == True
         assert target.config["advance_state_on_fallback"] == False
@@ -368,6 +369,38 @@ class TestDucklakeSink:
         value = sink._sanitize_value("2025-10-04T12:00:00 UTC-08:00", "created_at")
         assert value == "2025-10-04T20:00:00"
         assert sink._tz_warning_emitted is True
+
+    def test_date_string_sanitization(self, mock_target):
+        """Date sanitization coerces common formats to ISO-8601."""
+        mock_target.config.update({
+            "sanitize_dates": True,
+        })
+        schema = {
+            "type": "object",
+            "properties": {
+                "created_at": {"type": "string"},
+            },
+        }
+
+        with patch("target_ducklake.sinks.DuckLakeConnector") as connector_cls:
+            connector = connector_cls.return_value
+            connector.json_to_ducklake_schema.return_value = [
+                {"name": "created_at", "type": "STRING"},
+            ]
+            sink = ducklakeSink(
+                target=mock_target,
+                stream_name="users",
+                schema=schema,
+                key_properties=None,
+            )
+
+        iso_date = sink._sanitize_value("03/01/2024", "created_at")
+        assert iso_date == "2024-03-01"
+
+        iso_datetime = sink._sanitize_value("2024-03-01 15:30:45", "created_at")
+        assert iso_datetime == "2024-03-01T15:30:45"
+
+        assert "created_at" in sink._date_warning_emitted
 
     def test_process_batch_quarantine_on_failure(self, mock_target, tmp_path):
         """Failed batches are quarantined when fallback is enabled."""
