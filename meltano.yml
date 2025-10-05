@@ -96,6 +96,29 @@ plugins:
       description: Maximum number of records to process in a single batch
       default: 10000
 
+    - name: fallback_on_insert_error
+      kind: boolean
+      label: Quarantine Failed Batches
+      description: When true, write failing batches to a fallback directory before raising.
+      default: false
+
+    - name: fallback_dir
+      kind: string
+      label: Fallback Directory
+      description: Directory where quarantined batches are written (defaults to <data_path>/_failed_batches/).
+
+    - name: fallback_include_payload
+      kind: boolean
+      label: Include Raw Payload in Fallback
+      description: When true, also write raw Singer RECORD payloads as records.jsonl in the fallback directory.
+      default: true
+
+    - name: advance_state_on_fallback
+      kind: boolean
+      label: Advance State After Fallback
+      description: Continue processing and advance state even when a batch was quarantined.
+      default: false
+
     - name: add_record_metadata
       kind: boolean
       label: Add Record Metadata
@@ -113,6 +136,17 @@ plugins:
       description: When True, automatically attempts to cast timestamp-like fields to timestamp types in ducklake.
       default: false
 
+    - name: sanitize_timezones
+      kind: boolean
+      label: Sanitize Timezones
+      description: Normalize timezone-aware values and UTC±HH:MM strings before Arrow ingestion. Defaults to auto_cast_timestamps when unset.
+
+    - name: sanitize_dates
+      kind: boolean
+      label: Sanitize Dates
+      description: Normalize date and datetime-like strings to ISO-8601 before ingestion.
+      default: false
+
     - name: validate_records
       kind: boolean
       label: Validate Records
@@ -127,6 +161,27 @@ plugins:
         - append
         - merge
         - overwrite
+
+    - name: dates_to_varchar
+      kind: boolean
+      label: Dates to VARCHAR
+      description: Force timestamp-like columns to VARCHAR before ingestion to avoid timezone issues.
+      default: false
+
+    - name: dates_to_varchar_streams
+      kind: array
+      label: Streams for Dates to VARCHAR
+      description: List of stream names whose timestamp-like columns should be coerced to VARCHAR when enabled.
+
+    - name: dates_to_varchar_columns
+      kind: object
+      label: Columns for Dates to VARCHAR
+      description: Mapping of stream name to explicit column names that should be coerced to VARCHAR.
+
+    - name: dates_to_varchar_glob
+      kind: array
+      label: Column Patterns for Dates to VARCHAR
+      description: Glob patterns that match column names which should be coerced to VARCHAR.
 
     - name: overwrite_if_no_pk
       kind: boolean

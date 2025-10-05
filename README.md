@@ -29,8 +29,18 @@ Supports append, merge, and overwrite load methods (default is merge). The load 
 | `flatten_max_level` | integer | ❌ | `0` | Maximum depth for flattening nested fields. Set to 0 to disable flattening |
 | `temp_file_dir` | string | ❌ | `"temp_files/"` | Directory path for storing temporary parquet files |
 | `max_batch_size` | integer | ❌ | `10000` | Maximum number of records to process in a single batch |
+| `fallback_on_insert_error` | boolean | ❌ | `false` | When true, quarantines failed batches to Parquet instead of failing immediately |
+| `fallback_dir` | string | ❌ | `<data_path>/_failed_batches/` | Directory where quarantined batch artifacts are written |
+| `fallback_include_payload` | boolean | ❌ | `true` | Also write the raw Singer RECORD payloads as `records.jsonl` when quarantining |
+| `advance_state_on_fallback` | boolean | ❌ | `false` | Continue processing and advance state after quarantine instead of re-raising |
 | `partition_fields` | object | ❌ | - | Object mapping stream names to arrays of partition column definitions. Each stream key maps directly to an array of column definitions |
 | `auto_cast_timestamps` | boolean | ❌ | `false` | When True, automatically attempts to cast timestamp-like fields to timestamp types in ducklake |
+| `sanitize_timezones` | boolean | ❌ | follows `auto_cast_timestamps` | Normalize timezone-aware values and UTC±HH:MM strings before Arrow ingestion |
+| `sanitize_dates` | boolean | ❌ | `false` | Normalize date and datetime-like strings to ISO-8601 before ingestion |
+| `dates_to_varchar` | boolean | ❌ | `false` | Force timestamp-like columns to VARCHAR to avoid timezone and formatting issues |
+| `dates_to_varchar_streams` | array | ❌ | - | List of stream names whose timestamp-like columns should be coerced to VARCHAR |
+| `dates_to_varchar_columns` | object | ❌ | - | Mapping of stream name to explicit column names to coerce to VARCHAR |
+| `dates_to_varchar_glob` | array | ❌ | - | Glob patterns that match column names to coerce to VARCHAR |
 | `validate_records` | boolean | ❌ | `false` | Whether to validate the schema of the incoming streams |
 | `overwrite_if_no_pk` | boolean | ❌ | `false` | When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method. |
 
@@ -57,7 +67,54 @@ plugins:
         auto_cast_timestamps: true # Optional
         overwrite_if_no_pk: true # Optional (default false)
         partition_fields: {"my_stream": [{"column_name": "created_at", "type": "timestamp", "granularity": ["year", "month"]}]} # Optional
+        fallback_on_insert_error: true # Optional - quarantine failed batches instead of failing immediately
+        fallback_dir: ${MELTANO_PROJECT_ROOT}/.ducklake/_failed_batches # Optional override
+        fallback_include_payload: true # Optional - also write raw Singer payloads
+        sanitize_timezones: true # Optional - normalize UTC±HH:MM style strings
+        sanitize_dates: true # Optional - rewrite non-ISO date strings
+        dates_to_varchar: true # Optional - force timestamp-like columns to VARCHAR
 ```
+
+### Resilient loading
+
+When `fallback_on_insert_error` is enabled, each failing batch is quarantined to
+`<fallback_dir>/<stream>/<UTC timestamp>/` with:
+
+- `batch.parquet` – the sanitized records written out as Parquet.
+- `meta.json` – error metadata, schema details, and relevant configuration.
+- `records.jsonl` – optional Singer RECORD payloads (enabled by
+  `fallback_include_payload`).
+
+`sanitize_timezones` converts timezone-aware Python datetimes and `UTC±HH:MM`
+style strings to UTC-naive ISO strings before Arrow ingestion. `sanitize_dates`
+normalizes slash-separated or other non-ISO date strings to ISO-8601 before Arrow
+ingestion. The `dates_to_varchar*` settings coerce timestamp-like columns to VARCHAR
+so DuckDB never has to parse problematic formats. Each coerced column increments the
+`target_ducklake_dates_to_varchar_columns_total{stream}` metric, while each
+quarantined batch increments
+`target_ducklake_fallback_batches_total{stream}`.
+
+### Quarantine & Replay
+
+Quarantined Parquet files can be replayed transactionally with DuckLake once the
+bad data has been reviewed:
+
+```sql
+-- Setup
+INSTALL ducklake; LOAD ducklake;
+
+-- Attach your catalog (and data path) as usual
+ATTACH 'ducklake:POSTGRES://…' AS dl (DATA_PATH 'gs://…');
+
+-- Register quarantined file(s):
+SELECT ducklake_add_data_files(
+  'FACEBOOKADS.creatives',
+  ['gs://def-ducklake/.../_failed_batches/creatives/2025-10-04T19-33-58Z/batch.parquet']
+);
+```
+
+DuckLake registers (rather than copies) the files so ownership transfers to the
+catalog and future compaction can clean them up.
 
 ### Partitioning
 

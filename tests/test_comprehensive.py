@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from singer_sdk.exceptions import ConfigValidationError
 
@@ -104,6 +108,12 @@ class TestTargetducklakeConfig:
         assert target.config["temp_file_dir"] == "temp_files/"
         assert target.config["max_batch_size"] == 10000
         assert target.config["auto_cast_timestamps"] == False
+        assert target.config["sanitize_timezones"] == False
+        assert target.config["sanitize_dates"] == False
+        assert target.config["fallback_on_insert_error"] == False
+        assert target.config["fallback_include_payload"] == True
+        assert target.config["advance_state_on_fallback"] == False
+        assert target.config["dates_to_varchar"] == False
 
     def test_partition_fields_config(self):
         """Test partition fields configuration."""
@@ -123,6 +133,32 @@ class TestTargetducklakeConfig:
         }
         target = Targetducklake(config=config)
         assert "users" in target.config["partition_fields"]
+
+    def test_sanitize_timezones_tracks_auto_cast(self):
+        """Sanitize timezones defaults to auto_cast_timestamps when unset."""
+        config = {
+            "catalog_url": "test.db",
+            "data_path": "/tmp/test",
+            "storage_type": "local",
+            "auto_cast_timestamps": True,
+        }
+        target = Targetducklake(config=config)
+        assert target.config["sanitize_timezones"] is True
+
+    def test_dates_to_varchar_literal_parsing(self):
+        """Literal parsing converts string inputs to Python collections."""
+        config = {
+            "catalog_url": "test.db",
+            "data_path": "/tmp/test",
+            "storage_type": "local",
+            "dates_to_varchar_streams": "['users']",
+            "dates_to_varchar_columns": "{'users': ['created_at']}",
+            "dates_to_varchar_glob": "['*_time']",
+        }
+        target = Targetducklake(config=config)
+        assert target.config["dates_to_varchar_streams"] == ["users"]
+        assert target.config["dates_to_varchar_columns"] == {"users": ["created_at"]}
+        assert target.config["dates_to_varchar_glob"] == ["*_time"]
 
 
 class TestDuckLakeConnector:
@@ -268,6 +304,173 @@ class TestDucklakeSink:
                     key_properties=None,
                 )
                 # This would test the actual target_schema property
+
+    def test_dates_to_varchar_coercion(self, mock_target):
+        """Dates-to-VARCHAR configuration coerces schema and values."""
+        mock_target.config.update({
+            "dates_to_varchar": True,
+            "temp_file_dir": "temp_files/",
+        })
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "created_at": {"type": "string", "format": "date-time"},
+            },
+        }
+
+        with patch("target_ducklake.sinks.DuckLakeConnector") as connector_cls:
+            connector = connector_cls.return_value
+            connector.json_to_ducklake_schema.return_value = [
+                {"name": "id", "type": "INTEGER"},
+                {"name": "created_at", "type": "STRING"},
+            ]
+            sink = ducklakeSink(
+                target=mock_target,
+                stream_name="users",
+                schema=schema,
+                key_properties=None,
+            )
+
+        assert "created_at" in sink._varchar_columns
+        assert (
+            "target_ducklake_dates_to_varchar_columns_total",
+            {"stream": "users"},
+        ) in sink._emitted_metrics
+
+        records = [{"id": 1, "created_at": datetime(2024, 1, 1, tzinfo=timezone.utc)}]
+        sink._coerce_records_to_varchar(records)
+        assert isinstance(records[0]["created_at"], str)
+
+    def test_timezone_sanitization(self, mock_target):
+        """Timezone sanitization normalizes UTC± offsets."""
+        mock_target.config.update({
+            "sanitize_timezones": True,
+        })
+        schema = {
+            "type": "object",
+            "properties": {
+                "created_at": {"type": "string"},
+            },
+        }
+
+        with patch("target_ducklake.sinks.DuckLakeConnector") as connector_cls:
+            connector = connector_cls.return_value
+            connector.json_to_ducklake_schema.return_value = [
+                {"name": "created_at", "type": "STRING"},
+            ]
+            sink = ducklakeSink(
+                target=mock_target,
+                stream_name="users",
+                schema=schema,
+                key_properties=None,
+            )
+
+        value = sink._sanitize_value("2025-10-04T12:00:00 UTC-08:00", "created_at")
+        assert value == "2025-10-04T20:00:00"
+        assert sink._tz_warning_emitted is True
+
+    def test_date_string_sanitization(self, mock_target):
+        """Date sanitization coerces common formats to ISO-8601."""
+        mock_target.config.update({
+            "sanitize_dates": True,
+        })
+        schema = {
+            "type": "object",
+            "properties": {
+                "created_at": {"type": "string"},
+            },
+        }
+
+        with patch("target_ducklake.sinks.DuckLakeConnector") as connector_cls:
+            connector = connector_cls.return_value
+            connector.json_to_ducklake_schema.return_value = [
+                {"name": "created_at", "type": "STRING"},
+            ]
+            sink = ducklakeSink(
+                target=mock_target,
+                stream_name="users",
+                schema=schema,
+                key_properties=None,
+            )
+
+        iso_date = sink._sanitize_value("03/01/2024", "created_at")
+        assert iso_date == "2024-03-01"
+
+        iso_datetime = sink._sanitize_value("2024-03-01 15:30:45", "created_at")
+        assert iso_datetime == "2024-03-01T15:30:45"
+
+        assert "created_at" in sink._date_warning_emitted
+
+    def test_process_batch_quarantine_on_failure(self, mock_target, tmp_path):
+        """Failed batches are quarantined when fallback is enabled."""
+        fallback_dir = tmp_path / "fallback"
+        temp_dir = tmp_path / "temp"
+        mock_target.config.update(
+            {
+                "fallback_on_insert_error": True,
+                "fallback_dir": str(fallback_dir),
+                "fallback_include_payload": True,
+                "temp_file_dir": str(temp_dir),
+                "sanitize_timezones": True,
+            }
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "created_at": {"type": "string", "format": "date-time"},
+            },
+        }
+
+        with patch("target_ducklake.sinks.DuckLakeConnector") as connector_cls:
+            connector = connector_cls.return_value
+            connector.json_to_ducklake_schema.return_value = [
+                {"name": "id", "type": "INTEGER"},
+                {"name": "created_at", "type": "STRING"},
+            ]
+            connector.get_table_columns.return_value = ["id", "created_at"]
+            connector.insert_into_table.side_effect = RuntimeError("boom")
+            sink = ducklakeSink(
+                target=mock_target,
+                stream_name="users",
+                schema=schema,
+                key_properties=None,
+            )
+
+        context = {
+            "records": [
+                {"id": 1, "created_at": "2025-10-04T12:00:00 UTC-08:00"},
+            ]
+        }
+
+        with pytest.raises(RuntimeError):
+            sink.process_batch(context)
+
+        quarantine_dirs = list(Path(fallback_dir, "users").glob("*"))
+        assert len(quarantine_dirs) == 1
+        batch_dir = quarantine_dirs[0]
+        parquet_path = batch_dir / "batch.parquet"
+        meta_path = batch_dir / "meta.json"
+        records_path = batch_dir / "records.jsonl"
+
+        assert parquet_path.exists()
+        assert meta_path.exists()
+        assert records_path.exists()
+
+        table = pq.read_table(parquet_path)
+        assert table.column("created_at").to_pylist()[0] == "2025-10-04T20:00:00"
+
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["error"]["type"] == "RuntimeError"
+        assert meta["settings"]["fallback_on_insert_error"] is True
+
+        records = [json.loads(line) for line in records_path.read_text(encoding="utf-8").splitlines()]
+        assert records[0]["created_at"] == "2025-10-04T12:00:00 UTC-08:00"
+        assert (
+            "target_ducklake_fallback_batches_total",
+            {"stream": "users"},
+        ) in sink._emitted_metrics
 
 
 class TestFlattenModule:

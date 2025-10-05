@@ -31,19 +31,48 @@ class Targetducklake(Target):
             logging.info(
                 f"Successfully parsed partition_fields from string to object: {parsed_partition_fields}"
             )
+
+        def _parse_literal_if_string(key: str) -> None:
+            if key in config and isinstance(config[key], str):
+                try:
+                    config[key] = ast.literal_eval(config[key])
+                except (ValueError, SyntaxError):
+                    logging.warning(
+                        "Failed to parse %s from string; keeping original value", key
+                    )
+
+        for literal_key in (
+            "dates_to_varchar_streams",
+            "dates_to_varchar_columns",
+            "dates_to_varchar_glob",
+        ):
+            _parse_literal_if_string(literal_key)
+
         if "max_batch_size" in config:
             logging.warning(f"max_batch_size: {config.get('max_batch_size')}")
             config["max_batch_size"] = int(config.get("max_batch_size", 10000))
         if "flatten_max_level" in config:
             config["flatten_max_level"] = int(config.get("flatten_max_level", 0))
-        if "validate_records" in config and isinstance(config["validate_records"], str):
-            config["validate_records"] = config["validate_records"].lower() == "true"
-        if "overwrite_if_no_pk" in config and isinstance(
-            config["overwrite_if_no_pk"], str
-        ):
-            config["overwrite_if_no_pk"] = (
-                config["overwrite_if_no_pk"].lower() == "true"
-            )
+
+        bool_keys = (
+            "validate_records",
+            "overwrite_if_no_pk",
+            "auto_cast_timestamps",
+            "fallback_on_insert_error",
+            "fallback_include_payload",
+            "advance_state_on_fallback",
+            "sanitize_timezones",
+            "sanitize_dates",
+            "dates_to_varchar",
+        )
+        for key in bool_keys:
+            if key in config and isinstance(config[key], str):
+                config[key] = config[key].lower() == "true"
+
+        if "sanitize_timezones" not in config:
+            config["sanitize_timezones"] = config.get("auto_cast_timestamps", False)
+        if "sanitize_dates" not in config:
+            config["sanitize_dates"] = False
         return config
 
     config_jsonschema = th.PropertiesList(
@@ -173,6 +202,101 @@ class Targetducklake(Target):
             default=10000,
             title="Max Batch Size",
             description="Maximum number of records to process in a single batch",
+        ),
+        th.Property(
+            "fallback_on_insert_error",
+            th.BooleanType(),
+            default=False,
+            title="Quarantine Failed Batches",
+            description=(
+                "When True, batches that fail during insert/merge are written to a fallback"
+                " directory for later replay instead of immediately failing."
+            ),
+        ),
+        th.Property(
+            "fallback_dir",
+            th.StringType(),
+            title="Fallback Directory",
+            description=(
+                "Directory where quarantined batches are written when fallback_on_insert_error"
+                " is enabled. Defaults to <data_path>/_failed_batches/."
+            ),
+        ),
+        th.Property(
+            "fallback_include_payload",
+            th.BooleanType(),
+            default=True,
+            title="Include Raw Payload in Fallback",
+            description=(
+                "When True, also write the raw Singer RECORD payloads as records.jsonl in the"
+                " fallback directory."
+            ),
+        ),
+        th.Property(
+            "advance_state_on_fallback",
+            th.BooleanType(),
+            default=False,
+            title="Advance State After Fallback",
+            description=(
+                "When True, the target continues processing and advances state after writing a"
+                " quarantined batch. When False, the original error is raised to halt the run."
+            ),
+        ),
+        th.Property(
+            "sanitize_timezones",
+            th.BooleanType(),
+            title="Sanitize Timezones",
+            description=(
+                "Normalize timezone-aware values and UTC±HH:MM strings to UTC-naive timestamps"
+                " prior to Arrow ingestion. Defaults to the value of auto_cast_timestamps."
+            ),
+        ),
+        th.Property(
+            "sanitize_dates",
+            th.BooleanType(),
+            default=False,
+            title="Sanitize Date Strings",
+            description=(
+                "Normalize date and datetime-like strings to ISO-8601 so Arrow and DuckLake "
+                "ingest them consistently."
+            ),
+        ),
+        th.Property(
+            "dates_to_varchar",
+            th.BooleanType(),
+            default=False,
+            title="Coerce Dates to VARCHAR",
+            description=(
+                "When True, timestamp-like columns are coerced to VARCHAR prior to ingestion"
+                " to avoid timezone and format errors."
+            ),
+        ),
+        th.Property(
+            "dates_to_varchar_streams",
+            th.ArrayType(th.StringType()),
+            title="Streams for Dates→VARCHAR",
+            description=(
+                "List of stream names whose timestamp-like columns should be coerced to"
+                " VARCHAR when dates_to_varchar is enabled."
+            ),
+        ),
+        th.Property(
+            "dates_to_varchar_columns",
+            th.ObjectType(additional_properties=th.ArrayType(th.StringType())),
+            title="Specific Columns for Dates→VARCHAR",
+            description=(
+                "Mapping of stream name to specific column names that should be coerced to"
+                " VARCHAR."
+            ),
+        ),
+        th.Property(
+            "dates_to_varchar_glob",
+            th.ArrayType(th.StringType()),
+            title="Column Patterns for Dates→VARCHAR",
+            description=(
+                "List of glob patterns applied to column names across all streams to mark"
+                " columns that should be coerced to VARCHAR."
+            ),
         ),
         th.Property(
             "partition_fields",
