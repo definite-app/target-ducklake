@@ -18,9 +18,6 @@ TIMESTAMP_COLUMN_NAMES = {
     "last_modified",
     "updatedat",
     "createdat",
-    # Facebook-specific timestamp columns
-    "created_time",
-    "updated_time",
 }
 
 
