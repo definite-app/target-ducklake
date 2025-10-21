@@ -293,9 +293,11 @@ class ducklakeSink(BatchSink):
 
     def clean_up(self) -> None:
         """Perform per-stream cleanup."""
+        self.logger.info(f"Cleaning up resources for stream {self.stream_name}")
         super().clean_up()
         # Close the DB connection for this stream's sink
         if hasattr(self, "connector"):
+            self.logger.info(f"Closing DuckDB and catalog connection for stream {self.stream_name}")
             self.connector.close()
         # Remove this stream's dedicated temp directory
         if hasattr(self, "temp_file_dir"):
