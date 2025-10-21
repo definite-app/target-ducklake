@@ -1,6 +1,6 @@
 [project]
 name = "target-ducklake"
-version = "0.0.1"
+version = "0.0.2"
 description = "Singer target for ducklake, built with the Meltano Singer SDK."
 readme = "README.md"
 authors = [{ name = "Steven Wang", email = "steven@definite.app" }]
@@ -22,7 +22,7 @@ license = "Apache-2.0"
 license-files = [ "LICENSE" ]
 requires-python = ">=3.9"
 dependencies = [
-    "duckdb>=1.3.2",
+    "duckdb~=1.4.0",
     "polars>=1.31.0",
     "pyarrow>=20.0.0",
     "ruff>=0.12.5",

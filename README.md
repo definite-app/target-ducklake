@@ -2,7 +2,7 @@
 
 `target-ducklake` is a Singer target for ducklake. This target is in development and may not be stable. I built this with GCS in mind, but it should work with S3 and local storage, though this has not been tested extensively.
 
-Currently only supports append and merging data. If no key properties are provided, data is appended. If key properties are provided, data is automatically merged. 
+Supports append, merge, and overwrite load methods (default is merge). The load method can be configured using the `load_method` setting. If no key properties are provided and `overwrite_if_no_pk` is true, data will be overwritten. Otherwise, the configured load method determines the behavior.
 
 ## TODOs
 
@@ -25,13 +25,15 @@ Currently only supports append and merging data. If no key properties are provid
 | `default_target_schema` | string | ❌ | - | Default database schema where data should be written. If not provided schema will attempt to be inferred from the stream name (inferring schema only works for database extractors ) |
 | `target_schema_prefix` | string | ❌ | - | Prefix to add to the target schema name. If not provided, no prefix will be added |
 | `add_record_metadata` | boolean | ❌ | `false` | When True, automatically adds Singer Data Capture (SDC) metadata columns to target tables |
+| `load_method` | string | ❌ | `"merge"` | Method to use for loading data into the target table: append, merge, or overwrite |
 | `flatten_max_level` | integer | ❌ | `0` | Maximum depth for flattening nested fields. Set to 0 to disable flattening |
 | `temp_file_dir` | string | ❌ | `"temp_files/"` | Directory path for storing temporary parquet files |
 | `max_batch_size` | integer | ❌ | `10000` | Maximum number of records to process in a single batch |
 | `partition_fields` | object | ❌ | - | Object mapping stream names to arrays of partition column definitions. Each stream key maps directly to an array of column definitions |
 | `auto_cast_timestamps` | boolean | ❌ | `false` | When True, automatically attempts to cast timestamp-like fields to timestamp types in ducklake |
+| `convert_tz_to_utc` | boolean | ❌ | `false` | When True, automatically converts timezone of timestamp-like fields to UTC |
 | `validate_records` | boolean | ❌ | `false` | Whether to validate the schema of the incoming streams |
-| `overwrite_if_no_pk` | boolean | ❌ | `false` | When True, truncates the target table before inserting records if no primary keys are defined in the stream |
+| `overwrite_if_no_pk` | boolean | ❌ | `false` | When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method. |
 
 ### Example Meltano YAML Configuration
 
@@ -52,6 +54,7 @@ plugins:
         target_schema_prefix: my_prefix # Optional
         max_batch_size: 10000 # Optional (default 10000)
         add_record_metadata: true # Optional
+        load_method: merge # Optional (default merge, options: append, merge, overwrite)
         auto_cast_timestamps: true # Optional
         overwrite_if_no_pk: true # Optional (default false)
         partition_fields: {"my_stream": [{"column_name": "created_at", "type": "timestamp", "granularity": ["year", "month"]}]} # Optional

@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 import duckdb
 from singer_sdk.connectors.sql import JSONSchemaToSQL
-from sqlalchemy.types import BIGINT, INTEGER, JSON
+from sqlalchemy.types import BIGINT, DECIMAL, INTEGER, JSON
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,8 @@ class JSONSchemaToDuckLake(JSONSchemaToSQL):
         self.register_type_handler("array", JSON)
         # Override the default type handler for integer type
         self.register_type_handler("integer", self._handle_integer_type)
+        # Override number handling to use high-precision decimals by default
+        self.register_type_handler("number", self._handle_number_type)
 
     def _handle_integer_type(self, jsonschema: dict) -> INTEGER | BIGINT:
         """Handle integer type."""
@@ -38,6 +40,27 @@ class JSONSchemaToDuckLake(JSONSchemaToSQL):
         if minimum >= -(2**31) and maximum < 2**31:
             return INTEGER()
         return BIGINT()
+
+    def _handle_number_type(self, jsonschema: dict) -> DECIMAL:
+        """Handle number type with safe default precision.
+
+        Prefer high-precision DECIMAL to avoid overflow when casting floats from
+        parquet into DECIMAL columns. DuckDB supports precision up to 38.
+        """
+        # If schema provides explicit precision/scale, widen precision to 38.
+        precision = jsonschema.get("precision")
+        scale = jsonschema.get("scale")
+
+        max_precision = 38
+        default_scale = 9
+
+        if precision is not None:
+            precision = min(precision, max_precision)
+            scale = default_scale if scale is None else min(scale, precision)
+            return DECIMAL(precision, scale)
+
+        # Otherwise, use a generous default
+        return DECIMAL(max_precision, default_scale)
 
 
 class DuckLakeConnector:

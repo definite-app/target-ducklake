@@ -119,10 +119,25 @@ plugins:
       description: Whether to validate the schema of the incoming streams.
       default: false
 
+    - name: load_method
+      kind: string
+      label: Load Method
+      description: Method to use for loading data into the target table: append, merge, or overwrite
+      options:
+        - append
+        - merge
+        - overwrite
+
     - name: overwrite_if_no_pk
       kind: boolean
       label: Overwrite If No Primary Key
-      description: When True, truncates the target table before inserting records if no primary keys are defined in the stream.
+      description: When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method.
+      default: false
+
+    - name: convert_tz_to_utc
+      kind: boolean
+      label: Convert TZ to UTC
+      description: When True, automatically converts timezone of timestamp-like fields to UTC.
       default: false
 
     settings_group_validation:

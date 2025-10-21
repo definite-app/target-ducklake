@@ -6,6 +6,7 @@ https://github.com/meltano/sdk/blob/35b499d6163f91752fd674f2a3e46a7e22a1fb47/sin
 import collections
 import itertools
 import json
+from datetime import datetime, date
 from decimal import Decimal
 
 TIMESTAMP_COLUMN_NAMES = {
@@ -17,6 +18,8 @@ TIMESTAMP_COLUMN_NAMES = {
     "last_modified",
     "updatedat",
     "createdat",
+    "created_time",
+    "updated_time"
 }
 
 
@@ -25,6 +28,10 @@ class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)  # Convert Decimal to float
+        elif isinstance(obj, datetime):
+            return obj.isoformat()  # Convert datetime to ISO format string
+        elif isinstance(obj, date):
+            return obj.isoformat()  # Convert date to ISO format string
         return super().default(obj)
 
 

@@ -1,5 +1,6 @@
 # taken from https://github.com/Automattic/target-parquet/blob/master/target_parquet/utils/parquet.py
 import logging
+from datetime import datetime, timezone
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -77,38 +78,61 @@ def flatten_schema_to_pyarrow_schema(flatten_schema_dictionary: dict) -> pa.Sche
     )
 
 
-def create_pyarrow_table(list_dict: list[dict], schema: pa.Schema) -> pa.Table:
+def _normalize_datetime(value):
+    """Normalize datetime objects to UTC timezone for PyArrow compatibility.
+
+    PyArrow doesn't recognize custom timezone strings like 'UTC-07:00'.
+    This function converts datetime objects with any timezone to UTC.
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        # Convert to UTC timezone
+        return value.astimezone(timezone.utc)
+    return value
+
+
+def _normalize_data_for_pyarrow(data: dict, datetime_fields: list[str]) -> dict:
+    """Normalize data values to be compatible with PyArrow.
+
+    This handles datetime objects with non-standard timezone names.
+    Modifies the data dict in-place for efficiency.
+    """
+    if not datetime_fields:
+        return data
+
+    for key in datetime_fields:
+        if key in data:
+            data[key] = [_normalize_datetime(v) for v in data[key]]
+    return data
+
+
+def create_pyarrow_table(
+    list_dict: list[dict], pyarrow_schema: pa.Schema, datetime_fields: list = []
+) -> pa.Table:
     """Create a pyarrow Table from a python list of dict."""
-    data = {f: [row.get(f) for row in list_dict] for f in schema.names}
-    return pa.table(data).cast(schema)
+    data = {f: [row.get(f) for row in list_dict] for f in pyarrow_schema.names}
+    # Normalize datetime values to UTC timezone for PyArrow compatibility
+    normalized_data = _normalize_data_for_pyarrow(data, datetime_fields)
+    return pa.table(normalized_data).cast(pyarrow_schema)
 
 
 def concat_tables(
-    records: list[dict], pyarrow_table: pa.Table, pyarrow_schema: pa.Schema
+    records: list[dict],
+    pyarrow_table: pa.Table,
+    pyarrow_schema: pa.Schema,
+    flattened_schema: dict,
+    convert_tz_to_utc: bool = False,
 ) -> pa.Table:
     """Create a dataframe from records and concatenate with the existing one."""
     if not records:
         return pyarrow_table
-    new_table = create_pyarrow_table(records, pyarrow_schema)
+    if convert_tz_to_utc:
+        datetime_fields = [
+            field
+            for field in flattened_schema.keys()
+            if "format" in flattened_schema[field]
+            and flattened_schema[field]["format"] == "date-time"
+        ]
+    else:
+        datetime_fields = []
+    new_table = create_pyarrow_table(records, pyarrow_schema, datetime_fields)
     return pa.concat_tables([pyarrow_table, new_table]) if pyarrow_table else new_table
-
-
-def write_parquet_file(
-    table: pa.Table,
-    path: str,
-    compression_method: str = "gzip",
-    basename_template: str | None = None,
-    partition_cols: list[str] | None = None,
-) -> None:
-    """Write a pyarrow table to a parquet file."""
-    pq.write_to_dataset(
-        table,
-        root_path=path,
-        compression=compression_method,
-        partition_cols=partition_cols or None,
-        use_threads=True,
-        # use_legacy_dataset=False,
-        basename_template=f"{basename_template}{EXTENSION_MAPPING[compression_method.lower()]}.parquet"
-        if basename_template
-        else None,
-    )
