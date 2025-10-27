@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import duckdb
 from singer_sdk.connectors.sql import JSONSchemaToSQL
@@ -415,13 +414,26 @@ class DuckLakeConnector(SQLConnector):
         table_name: str,
         file_columns: list[str],
         target_table_columns: list[str],
-        key_properties: Sequence[str],
+        key_properties: list[str],
+        date_type_keys: list[Optional[str]] = [],
     ):
         """DuckLake doesn't support MERGE natively, so we need to use a workaround
         We first delete rows in the target table that are also in the parquet file (based on key_property)
         Then we insert the new data
         """
         columns_sql = self._build_columns_sql(file_columns, target_table_columns)
+
+        # Can't use IN comparison for datetime columns, so we cast to VARCHAR for the merge query
+        if date_type_keys:
+            for i in range(len(key_properties)):
+                key_name = key_properties[i]
+                if key_name in date_type_keys:
+                    logger.info(
+                        f"DATETIME primary key detected (column: {key_name}), casting to VARCHAR for merge query (will remain date-time type in final table)"
+                    )
+                    key_properties[
+                        i
+                    ] = f"{key_name}::VARCHAR"  # cast to VARCHAR for merge query
 
         if len(key_properties) == 1:
             key_condition = key_properties[0]
