@@ -188,6 +188,12 @@ class ducklakeSink(SQLSink):
         if not self.key_properties or pyarrow_df is None:
             return pyarrow_df
 
+        # Lowercase column names, SQLSink parent class cleans schema objects to lowercase
+        # https://github.com/meltano/sdk/blob/43502d246e94c5f51252dc7d00c758be8e6500f7/singer_sdk/sql/sink.py#L206
+        pyarrow_df = pyarrow_df.rename_columns(
+            [col.lower() for col in pyarrow_df.column_names]
+        )
+
         # Check that all key properties exist in the pyarrow table
         available_columns = set(pyarrow_df.column_names)
         for key_property in self.key_properties:
