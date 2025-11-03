@@ -231,7 +231,7 @@ class DuckLakeConnector(SQLConnector):
             DuckLakeConnectorError: If query execution fails
         """
         try:
-            logger.debug(f"Executing query: {query}")
+            # logger.info(f"Executing query: {query}")
             return self.connection.cursor().execute(query, parameters)
         except Exception as e:
             raise DuckLakeConnectorError(f"Query {query} failed with error: {e}") from e
@@ -302,7 +302,7 @@ class DuckLakeConnector(SQLConnector):
         columns: list[dict[str, str]],
         partition_fields: list[dict[str, str]] | None = None,
         overwrite_table: bool = False,
-    ) -> list[str]:
+    ) -> None:
         """Prepare the table for the target schema.
         If the table doesn't exist, create it.
         Add missing columns to existing table if necessary.
@@ -319,6 +319,8 @@ class DuckLakeConnector(SQLConnector):
             new_columns = [
                 col for col in columns if col["name"] not in existing_columns
             ]
+            # logger.info(f"Existing columns: {existing_columns}")
+            # logger.info(f"New columns to add: {new_columns}")
             if new_columns:
                 logger.info(f"Adding new columns to table {table_name}: {new_columns}")
                 self._add_columns(target_schema_name, table_name, new_columns)
@@ -337,7 +339,7 @@ class DuckLakeConnector(SQLConnector):
             )
             self._add_partition_fields(target_schema_name, table_name, partition_fields)
 
-        return self.get_table_columns(target_schema_name, table_name)
+        # return self.get_table_columns(target_schema_name, table_name)
 
     def _add_partition_fields(
         self,

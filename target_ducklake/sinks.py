@@ -159,12 +159,14 @@ class ducklakeSink(SQLSink):
             partition_fields=self.partition_fields,
             overwrite_table=self.should_overwrite_table,
         )
+        self.logger.info(f"Finished preparing table {self.target_table} in schema {self.target_schema}")
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         """Process incoming record and convert Decimal objects to float for PyArrow compatibility
         when writing to parquet files.
         """
         # Convert any Decimal objects to float so that we can write to parquet files
+        self.logger.info(f"Preprocessing record: {record}")
         for key, value in record.items():
             if isinstance(value, Decimal):
                 record[key] = float(value)
@@ -176,6 +178,7 @@ class ducklakeSink(SQLSink):
 
     def process_record(self, record: dict, context: dict) -> None:
         """Process the record and flatten if necessary."""
+        self.logger.info(f"Processing record: {record}")
         record_flatten = flatten_record(
             record,
             flatten_schema=self.flatten_schema,
