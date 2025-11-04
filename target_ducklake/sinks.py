@@ -13,7 +13,6 @@ import polars as pl
 import pyarrow.parquet as pq
 from singer_sdk import Target
 
-# from singer_sdk.connectors import SQLConnector
 from singer_sdk.sinks import BatchSink
 
 from target_ducklake.connector import DuckLakeConnector
