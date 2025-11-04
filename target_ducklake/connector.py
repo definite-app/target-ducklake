@@ -139,6 +139,7 @@ class DuckLakeConnector:
         """Get or create the DuckDB connection."""
         if self._connection is None:
             self._connection = self._create_connection()
+            logger.info("DuckDB and DuckLake catalog connection created.")
         return self._connection
 
     def _create_connection(self) -> duckdb.DuckDBPyConnection:
@@ -149,7 +150,6 @@ class DuckLakeConnector:
 
             # Execute startup script to configure DuckLake
             startup_script = self._build_startup_script()
-            # logger.info(f"Executing startup script: {startup_script}")
             conn.execute(startup_script)
 
             return conn
