@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Sequence
 from typing import Any, Dict, Optional
 
 import duckdb
