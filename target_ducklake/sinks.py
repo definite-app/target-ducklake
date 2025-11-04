@@ -7,6 +7,7 @@ import shutil
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
+import uuid
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -34,7 +35,11 @@ class ducklakeSink(BatchSink):
         key_properties: Sequence[str] | None,
     ) -> None:
         super().__init__(target, stream_name, schema, key_properties)
-        self.temp_file_dir = self.config.get("temp_file_dir", "temp_files/")
+
+        self.base_temp_file_dir = self.config.get("temp_file_dir", "temp_files/")
+        self.temp_file_dir = os.path.join(
+            self.base_temp_file_dir, f"{self.stream_name}_{uuid.uuid4()}"
+        )
         self.files_saved = 0
         self.convert_tz_to_utc = self.config.get("convert_tz_to_utc", False)
 
@@ -80,7 +85,7 @@ class ducklakeSink(BatchSink):
             self.load_method = "merge"
         else:
             self.logger.info(f"Load method {self.config.get('load_method')} provided for {self.stream_name}")
-            self.load_method = self.config.get("load_method")
+            self.load_method = str(self.config.get("load_method"))
 
         # Determine if table should be overwritten
         if not self.key_properties and self.config.get("overwrite_if_no_pk", False):
@@ -287,15 +292,23 @@ class ducklakeSink(BatchSink):
         # delete file after insert
         os.remove(temp_file_path)
 
-    def __del__(self) -> None:
-        """Cleanup when sink is destroyed."""
-        if hasattr(self, "connector"):
-            self.connector.close()
-        # delete the temp file
+    def clean_up(self) -> None:
+        """Perform per-stream cleanup."""
+        super().clean_up()
+        # Remove this stream's dedicated temp directory
         if hasattr(self, "temp_file_dir"):
-            self.logger.info(f"Cleaning up temp file directory {self.temp_file_dir}")
-            if os.path.exists(self.temp_file_dir):
-                shutil.rmtree(self.temp_file_dir)
+            self.logger.info(
+                f"Cleaning up temp directory for stream {self.stream_name}: {self.temp_file_dir}"
+            )
+            try:
+                if os.path.exists(self.temp_file_dir):
+                    shutil.rmtree(self.temp_file_dir)
+            except Exception as e:
+                self.logger.warning(
+                    f"Non-fatal error during temp directory cleanup for {self.stream_name}: {e}"
+                )
+
+
 
 
 def stream_name_to_dict(stream_name, separator="-"):
