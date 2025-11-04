@@ -144,7 +144,7 @@ class ducklakeSink(BatchSink):
 
     def setup(self) -> None:
         # create the target schema if it doesn't exist
-        self.connector.prepare_target_schema(self.target_schema)
+        self.connector.prepare_target_schema(target_schema_name=self.target_schema)
 
         # prepare the table
         self.connector.prepare_table(
@@ -213,11 +213,11 @@ class ducklakeSink(BatchSink):
         )
         pyarrow_df = None
         pyarrow_df = concat_tables(
-            context.get("records", []),
-            pyarrow_df,
-            self.pyarrow_schema,  # type: ignore
-            self.flatten_schema,
-            self.convert_tz_to_utc,
+            records=context.get("records", []),
+            pyarrow_table=pyarrow_df,
+            pyarrow_schema=self.pyarrow_schema,  # type: ignore
+            flattened_schema=self.flatten_schema,
+            convert_tz_to_utc=self.convert_tz_to_utc,
         )
 
         # Drop duplicates based on key properties if they exist in temp file
@@ -271,22 +271,26 @@ class ducklakeSink(BatchSink):
             or self.should_overwrite_table
         ):
             self.connector.insert_into_table(
-                temp_file_path,
-                self.target_schema,
-                self.target_table,
-                file_columns,
-                table_columns,
+                file_location=temp_file_path,
+                target_schema_name=self.target_schema,
+                table_name=self.target_table,
+                file_columns=file_columns,
+                target_table_columns=table_columns,
             )
 
         # If load method is merge, we merge the data
         elif self.load_method == "merge":
+            date_type_pks = [
+                col["name"] for col in self.ducklake_schema if col["type"] == "DATETIME"
+            ]
             self.connector.merge_into_table(
-                temp_file_path,
-                self.target_schema,
-                self.target_table,
-                file_columns,
-                table_columns,
-                self.key_properties,
+                file_location=temp_file_path,
+                target_schema_name=self.target_schema,
+                table_name=self.target_table,
+                file_columns=file_columns,
+                target_table_columns=table_columns,
+                key_properties=list(self.key_properties),
+                date_type_keys=list(date_type_pks),
             )
 
         # delete file after insert
