@@ -81,10 +81,14 @@ class ducklakeSink(BatchSink):
         )
 
         if not self.config.get("load_method"):
-            self.logger.info(f"No load method provided for {self.stream_name}, using default merge")
+            self.logger.info(
+                f"No load method provided for {self.stream_name}, using default merge"
+            )
             self.load_method = "merge"
         else:
-            self.logger.info(f"Load method {self.config.get('load_method')} provided for {self.stream_name}")
+            self.logger.info(
+                f"Load method {self.config.get('load_method')} provided for {self.stream_name}"
+            )
             self.load_method = str(self.config.get("load_method"))
 
         # Determine if table should be overwritten
@@ -311,8 +315,6 @@ class ducklakeSink(BatchSink):
                 self.logger.warning(
                     f"Non-fatal error during temp directory cleanup for {self.stream_name}: {e}"
                 )
-
-
 
 
 def stream_name_to_dict(stream_name, separator="-"):
