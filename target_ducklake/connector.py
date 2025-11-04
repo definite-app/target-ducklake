@@ -153,7 +153,7 @@ class DuckLakeConnector(SQLConnector):
             # Execute startup script to configure DuckLake
             startup_script = self._build_startup_script()
             # logger.info(f"Executing startup script: {startup_script}")
-            conn.execute(startup_script)
+            conn.cursor().execute(startup_script)
 
             return conn
         except Exception as e:
