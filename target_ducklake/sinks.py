@@ -13,7 +13,7 @@ import polars as pl
 import pyarrow.parquet as pq
 from singer_sdk import Target
 
-from singer_sdk.sinks import SQLSink
+from singer_sdk.sinks import BatchSink
 
 from target_ducklake.connector import DuckLakeConnector
 from target_ducklake.flatten import flatten_record, flatten_schema
@@ -23,10 +23,8 @@ from target_ducklake.parquet_utils import (
 )
 
 
-class ducklakeSink(SQLSink):
+class ducklakeSink(BatchSink):
     """ducklake target sink class."""
-
-    connector_class = DuckLakeConnector
 
     def __init__(
         self,
@@ -34,11 +32,8 @@ class ducklakeSink(SQLSink):
         stream_name: str,
         schema: dict,
         key_properties: Sequence[str] | None,
-        connector: DuckLakeConnector | None = None,
     ) -> None:
-        super().__init__(
-            target, stream_name, schema, key_properties, connector=connector
-        )
+        super().__init__(target, stream_name, schema, key_properties)
 
         self.base_temp_file_dir = self.config.get("temp_file_dir", "temp_files/")
         self.temp_file_dir = os.path.join(
@@ -50,6 +45,9 @@ class ducklakeSink(SQLSink):
         # NOTE: we probably don't need all this logging, but useful for debugging while target is in development
         # Log original schema for debugging
         self.logger.info(f"Original schema for stream '{stream_name}': {self.schema}")
+
+        # Use the connector for database operations
+        self.connector = DuckLakeConnector(dict(self.config))
 
         # Create pyarrow and Ducklake schemas
         self.flatten_max_level = self.config.get("flatten_max_level", 0)
@@ -188,12 +186,6 @@ class ducklakeSink(SQLSink):
         if not self.key_properties or pyarrow_df is None:
             return pyarrow_df
 
-        # Lowercase column names, SQLSink parent class cleans schema objects to lowercase
-        # https://github.com/meltano/sdk/blob/43502d246e94c5f51252dc7d00c758be8e6500f7/singer_sdk/sql/sink.py#L206
-        pyarrow_df = pyarrow_df.rename_columns(
-            [col.lower() for col in pyarrow_df.column_names]
-        )
-
         # Check that all key properties exist in the pyarrow table
         available_columns = set(pyarrow_df.column_names)
         for key_property in self.key_properties:
@@ -300,8 +292,8 @@ class ducklakeSink(SQLSink):
                 table_name=self.target_table,
                 file_columns=file_columns,
                 target_table_columns=table_columns,
-                key_properties=self.key_properties,
-                date_type_keys=date_type_pks,
+                key_properties=list(self.key_properties),
+                date_type_keys=list(date_type_pks),
             )
 
         # delete file after insert
