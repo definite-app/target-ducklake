@@ -6,14 +6,14 @@ import ast
 import logging
 
 from singer_sdk import typing as th
-from singer_sdk.target_base import Target
+from singer_sdk.target_base import SQLTarget
 
 from target_ducklake.sinks import (
     ducklakeSink,
 )
 
 
-class Targetducklake(Target):
+class Targetducklake(SQLTarget):
     name = "target-ducklake"
 
     @property

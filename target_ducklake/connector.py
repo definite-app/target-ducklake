@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 import duckdb
 from singer_sdk.connectors.sql import JSONSchemaToSQL
+from singer_sdk.connectors import SQLConnector
 from sqlalchemy.types import BIGINT, DECIMAL, INTEGER, JSON
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class JSONSchemaToDuckLake(JSONSchemaToSQL):
         return DECIMAL(max_precision, default_scale)
 
 
-class DuckLakeConnector:
+class DuckLakeConnector(SQLConnector):
     """Handles DuckLake database connections and setup."""
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -74,7 +75,7 @@ class DuckLakeConnector:
         Raises:
             DuckLakeConnectorError: If required configuration is missing
         """
-        self.config = config
+        super().__init__(config=config)
         self._validate_config()
 
         self.catalog_url = config.get("catalog_url")
@@ -88,6 +89,8 @@ class DuckLakeConnector:
         self._connection: duckdb.DuckDBPyConnection | None = None
         self.catalog_name = "ducklake_catalog"
         self.meta_schema = config.get("meta_schema")
+
+        # logger.info(f"DuckLakeConnector initialized with config: {self.config}")
 
     def _validate_config(self) -> None:
         """Validate required configuration parameters."""
@@ -228,7 +231,7 @@ class DuckLakeConnector:
         """
         try:
             logger.debug(f"Executing query: {query}")
-            return self.connection.execute(query, parameters)
+            return self.connection.cursor().execute(query, parameters)
         except Exception as e:
             raise DuckLakeConnectorError(f"Query {query} failed with error: {e}") from e
 
@@ -418,6 +421,18 @@ class DuckLakeConnector:
         Then we insert the new data
         """
         columns_sql = self._build_columns_sql(file_columns, target_table_columns)
+        # Can't use IN comparison for datetime columns, so we cast to VARCHAR for the merge query
+        if date_type_keys:
+            for i in range(len(key_properties)):
+                key_name = key_properties[i]
+                if key_name in date_type_keys:
+                    logger.info(
+                        f"DATETIME primary key detected (column: {key_name}), casting to VARCHAR for merge query (will remain date-time type in final table)"
+                    )
+                    key_properties[
+                        i
+                    ] = f"{key_name}::VARCHAR"  # cast to VARCHAR for merge query
+
         # Can't use IN comparison for datetime columns, so we cast to VARCHAR for the merge query
         if date_type_keys:
             for i in range(len(key_properties)):
