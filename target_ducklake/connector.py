@@ -84,6 +84,9 @@ class DuckLakeConnector:
         self.public_key = config.get("public_key")
         self.secret_key = config.get("secret_key")
         self.region = config.get("region")
+        self.endpoint = config.get("endpoint")
+        self.url_style = config.get("url_style")
+        self.use_ssl = bool(config.get("use_ssl", True))
 
         self._connection: duckdb.DuckDBPyConnection | None = None
         self.catalog_name = "ducklake_catalog"
@@ -201,6 +204,18 @@ class DuckLakeConnector:
                     f"SECRET '{self.secret_key}'",
                     f"REGION '{self.region}'",  # Always include since we validate it's required
                 ]
+                if self.endpoint:
+                    secret_parts.append(
+                        f"ENDPOINT '{self.endpoint}'"
+                    )
+                if self.url_style:
+                    secret_parts.append(
+                        f"URL_STYLE '{self.url_style}'"
+                    )
+                if self.use_ssl == False:
+                    secret_parts.append(
+                        f"USE_SSL false"
+                    )
 
                 script_parts.append("CREATE SECRET (" + ", ".join(secret_parts) + ");")
         elif self.storage_type in ["GCS", "S3"]:
@@ -442,9 +457,9 @@ class DuckLakeConnector:
         table_ref = f"{self.catalog_name}.{target_schema_name}.{table_name}"
         combined_sql = f"""
         BEGIN TRANSACTION;
-        DELETE FROM {table_ref} 
+        DELETE FROM {table_ref}
         WHERE {key_condition} IN (SELECT {key_condition} FROM '{file_location}');
-        INSERT INTO {table_ref} 
+        INSERT INTO {table_ref}
         SELECT {columns_sql} FROM '{file_location}';
         COMMIT;
         """
