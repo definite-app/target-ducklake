@@ -237,7 +237,15 @@ class ducklakeSink(BatchSink):
 
         # Drop duplicates based on key properties if they exist in temp file
         if self.key_properties and pyarrow_df is not None:
+            memory_before_dedup = self._get_memory_usage_mb()
             pyarrow_df = self._remove_temp_table_duplicates(pyarrow_df)
+
+            memory_after_dedup = self._get_memory_usage_mb()
+            memory_diff_dedup = memory_after_dedup - memory_before_dedup
+            self.logger.info(
+                f"[Memory] After deduplicating temp file: {memory_after_dedup:.2f} MB "
+                f"(delta: {memory_diff_dedup:+.2f} MB)"
+            )
 
         self.logger.info(
             f"Batch pyarrow table has ({len(pyarrow_df)} rows)"  # type: ignore
