@@ -10,6 +10,7 @@ from decimal import Decimal
 import uuid
 
 import polars as pl
+import psutil
 import pyarrow.parquet as pq
 from singer_sdk import Target
 
@@ -209,8 +210,19 @@ class ducklakeSink(BatchSink):
 
         return pyarrow_df
 
+    def _get_memory_usage_mb(self) -> float:
+        """Get current process memory usage in MB."""
+        process = psutil.Process()
+        return process.memory_info().rss / (1024 * 1024)
+
     def write_temp_file(self, context: dict) -> str:
         """Write the current batch to a temporary parquet file."""
+        # Track memory before writing temp file
+        memory_before_mb = self._get_memory_usage_mb()
+        self.logger.info(
+            f"[Memory] Before write_temp_file for {self.stream_name}: {memory_before_mb:.2f} MB"
+        )
+
         self.logger.info(
             f"Writing batch for {self.stream_name} with {len(context['records'])} records to parquet file."
         )
@@ -246,6 +258,15 @@ class ducklakeSink(BatchSink):
             self.files_saved += 1
             row_count = len(pyarrow_df) if pyarrow_df is not None else 0
             self.logger.info(f"Successfully wrote {row_count} rows to {file_name}")
+
+            # Track memory after writing temp file
+            memory_after_mb = self._get_memory_usage_mb()
+            memory_diff_mb = memory_after_mb - memory_before_mb
+            self.logger.info(
+                f"[Memory] After write_temp_file for {self.stream_name}: {memory_after_mb:.2f} MB "
+                f"(delta: {memory_diff_mb:+.2f} MB)"
+            )
+
             return full_temp_file_path
         except Exception as e:
             self.logger.error(
@@ -298,6 +319,9 @@ class ducklakeSink(BatchSink):
 
         # delete file after insert
         os.remove(temp_file_path)
+        self.logger.info(
+            f"[Memory] After merging temp file: {self._get_memory_usage_mb():.2f} MB"
+        )
 
     def clean_up(self) -> None:
         """Perform per-stream cleanup."""
