@@ -238,7 +238,7 @@ class ducklakeSink(BatchSink):
         memory_after_concat = self._get_memory_usage_mb()
         memory_diff_concat = memory_after_concat - memory_before_concat
         self.logger.info(
-            f"[Memory] After concatenating tables (was {memory_before_concat:.2f} MB before): {memory_after_concat:.2f} MB "
+            f"[Memory] After concatenating tables: {memory_after_concat:.2f} MB (was {memory_before_concat:.2f} MB before)"
             f"(delta: {memory_diff_concat:+.2f} MB, {memory_diff_concat/memory_before_concat*100:.2f}%)"
         )
 
@@ -250,7 +250,7 @@ class ducklakeSink(BatchSink):
             memory_after_dedup = self._get_memory_usage_mb()
             memory_diff_dedup = memory_after_dedup - memory_before_dedup
             self.logger.info(
-                f"[Memory] After deduplicating temp file (was {memory_before_dedup:.2f} MB before): {memory_after_dedup:.2f} MB "
+                f"[Memory] After deduplicating temp file: {memory_after_dedup:.2f} MB (was {memory_before_dedup:.2f} MB before)"
                 f"(delta: {memory_diff_dedup:+.2f} MB, {memory_diff_dedup/memory_before_dedup*100:.2f}%)"
             )
 
@@ -278,7 +278,7 @@ class ducklakeSink(BatchSink):
             memory_after_mb = self._get_memory_usage_mb()
             memory_diff_mb = memory_after_mb - memory_before_mb
             self.logger.info(
-                f"[Memory] After write_temp_file for {self.stream_name} (was {memory_before_mb:.2f} MB at start): {memory_after_mb:.2f} MB "
+                f"[Memory] After write_temp_file for {self.stream_name}: {memory_after_mb:.2f} MB (was {memory_before_mb:.2f} MB at start)"
                 f"(delta: {memory_diff_mb:+.2f} MB, {memory_diff_mb/memory_before_mb*100:.2f}%)"
             )
 
