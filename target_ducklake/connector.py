@@ -372,7 +372,7 @@ class DuckLakeConnector:
         file_columns: list[str],
         target_table_columns: list[str],
     ) -> str:
-        """Build SQL column list for SELECT statement used for INSERT and MERGE.
+        """Build SQL column list for SELECT statement used for INSERT.
         Orders columns by which they appear in the target table.
         If a column is not found in the file, it is replaced with NULL.
         """
