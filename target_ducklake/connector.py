@@ -372,7 +372,7 @@ class DuckLakeConnector:
         file_columns: list[str],
         target_table_columns: list[str],
     ) -> str:
-        """Build SQL column list for SELECT statement used for INSERT and MERGE.
+        """Build SQL column list for SELECT statement used for INSERT.
         Orders columns by which they appear in the target table.
         If a column is not found in the file, it is replaced with NULL.
         """
@@ -413,48 +413,56 @@ class DuckLakeConnector:
         key_properties: list[str],
         date_type_keys: list[Optional[str]] = [],
     ):
-        """DuckLake doesn't support MERGE natively, so we need to use a workaround
-        We first delete rows in the target table that are also in the parquet file (based on key_property)
-        Then we insert the new data
+        """Merge data from a parquet file into the table using MERGE INTO statement.
+
+        Uses key_properties to match rows between source and target.
+        Matched rows are updated, unmatched rows are inserted.
         """
-        columns_sql = self._build_columns_sql(file_columns, target_table_columns)
-        # Can't use IN comparison for datetime columns, so we cast to VARCHAR for the merge query
-        if date_type_keys:
-            for i in range(len(key_properties)):
-                key_name = key_properties[i]
-                if key_name in date_type_keys:
-                    logger.info(
-                        f"DATETIME primary key detected (column: {key_name}), casting to VARCHAR for merge query (will remain date-time type in final table)"
-                    )
-                    key_properties[
-                        i
-                    ] = f"{key_name}::VARCHAR"  # cast to VARCHAR for merge query
-
-        if len(key_properties) == 1:
-            key_condition = key_properties[0]
-        else:
-            logger.info(
-                f"Multiple key properties detected: {key_properties}, attempting to merge with composite key"
-            )
-            key_condition = f"({'||'.join(key_properties)})"
-
-        # Build the atomic merge operation
         table_ref = f"{self.catalog_name}.{target_schema_name}.{table_name}"
-        combined_sql = f"""
-        BEGIN TRANSACTION;
-        DELETE FROM {table_ref} 
-        WHERE {key_condition} IN (SELECT {key_condition} FROM '{file_location}');
-        INSERT INTO {table_ref} 
-        SELECT {columns_sql} FROM '{file_location}';
-        COMMIT;
+
+        # Build ON condition for key properties
+        on_conditions = []
+        for key in key_properties:
+            if key in date_type_keys:
+                logger.info(
+                    f"DATETIME primary key detected (column: {key}), casting to VARCHAR for merge comparison"
+                )
+                on_conditions.append(f'target."{key}"::VARCHAR = source."{key}"::VARCHAR')
+            else:
+                on_conditions.append(f'target."{key}" = source."{key}"')
+        on_clause = " AND ".join(on_conditions)
+
+        # Build UPDATE SET clause for all columns
+        update_assignments = []
+        for col in target_table_columns:
+            if col in file_columns:
+                update_assignments.append(f'"{col}" = source."{col}"')
+            else:
+                update_assignments.append(f'"{col}" = NULL')
+        update_clause = ", ".join(update_assignments)
+
+        # Build INSERT clause
+        insert_columns = ", ".join([f'"{col}"' for col in target_table_columns])
+        insert_values = []
+        for col in target_table_columns:
+            if col in file_columns:
+                insert_values.append(f'source."{col}"')
+            else:
+                insert_values.append("NULL")
+        values_clause = ", ".join(insert_values)
+
+        merge_sql = f"""
+        MERGE INTO {table_ref} AS target
+        USING '{file_location}' AS source
+        ON ({on_clause})
+        WHEN MATCHED THEN UPDATE SET {update_clause}
+        WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({values_clause});
         """
 
-        logger.info(f"Executing atomic merge operation on table {table_name}")
-        logger.info(f"Merge SQL: {combined_sql}")
+        logger.info(f"Executing MERGE operation on table {table_name}")
+        logger.info(f"Merge SQL: {merge_sql}")
 
-        # Once MERGE is supported, we can use it instead of this workaround
-        # SEE: https://github.com/duckdb/ducklake/issues/66#issuecomment-2917089352
-        self.execute(combined_sql)
+        self.execute(merge_sql)
 
     def json_to_ducklake_schema(self, schema: dict) -> list[dict[str, str]]:
         """Convert a JSON schema to an array of dictionaries with column name and type.
