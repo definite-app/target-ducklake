@@ -427,7 +427,9 @@ class DuckLakeConnector:
                 logger.info(
                     f"DATETIME primary key detected (column: {key}), casting to VARCHAR for merge comparison"
                 )
-                on_conditions.append(f'target."{key}"::VARCHAR = source."{key}"::VARCHAR')
+                on_conditions.append(
+                    f'target."{key}"::VARCHAR = source."{key}"::VARCHAR'
+                )
             else:
                 on_conditions.append(f'target."{key}" = source."{key}"')
         on_clause = " AND ".join(on_conditions)
