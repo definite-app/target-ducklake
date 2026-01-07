@@ -3,7 +3,6 @@ import logging
 from datetime import datetime, timezone
 
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 FIELD_TYPE_TO_PYARROW = {
     "BOOLEAN": pa.bool_(),

@@ -19,7 +19,7 @@ TIMESTAMP_COLUMN_NAMES = {
     "updatedat",
     "createdat",
     "created_time",
-    "updated_time"
+    "updated_time",
 }
 
 
@@ -181,15 +181,17 @@ def flatten_schema(
 
 # pylint: disable=redefined-outer-name
 def _should_json_dump_value(key, value, flatten_schema=None):
+    """
+    Adapted from here: https://github.com/jwills/target-duckdb/blob/36c8ce68a0b2584c4bbb07325482968b1edc0c40/target_duckdb/db_sync.py#L125
+    """
     if isinstance(value, (dict, list)):
         return True
 
-    if (
-        flatten_schema
-        and key in flatten_schema
-        and "type" in flatten_schema[key]
-        and set(flatten_schema[key]["type"]) == {"null", "object", "array"}
-    ):
-        return True
+    if flatten_schema and key in flatten_schema and "type" in flatten_schema[key]:
+        t = flatten_schema[key]["type"]
+        t = [t] if isinstance(t, str) else t
+        # If array OR object type, return True. We need to JSON dump these values.
+        if "array" in t or "object" in t:
+            return True
 
     return False

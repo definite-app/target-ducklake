@@ -239,10 +239,11 @@ class ducklakeSink(BatchSink):
         memory_diff_concat = memory_after_concat - memory_before_concat
         self.logger.info(
             f"[Memory] After concatenating tables: {memory_after_concat:.2f} MB (was {memory_before_concat:.2f} MB before)"
-            f"(delta: {memory_diff_concat:+.2f} MB, {memory_diff_concat/memory_before_concat*100:.2f}%)"
+            f"(delta: {memory_diff_concat:+.2f} MB, {memory_diff_concat / memory_before_concat * 100:.2f}%)"
         )
 
         # Drop duplicates based on key properties if they exist in temp file
+        # TODO: we may be able to skip this step. Deduplication handled when merging into DuckLake.
         if self.key_properties and pyarrow_df is not None:
             memory_before_dedup = self._get_memory_usage_mb()
             pyarrow_df = self._remove_temp_table_duplicates(pyarrow_df)
@@ -251,7 +252,7 @@ class ducklakeSink(BatchSink):
             memory_diff_dedup = memory_after_dedup - memory_before_dedup
             self.logger.info(
                 f"[Memory] After deduplicating temp file: {memory_after_dedup:.2f} MB (was {memory_before_dedup:.2f} MB before)"
-                f"(delta: {memory_diff_dedup:+.2f} MB, {memory_diff_dedup/memory_before_dedup*100:.2f}%)"
+                f"(delta: {memory_diff_dedup:+.2f} MB, {memory_diff_dedup / memory_before_dedup * 100:.2f}%)"
             )
 
         self.logger.info(
@@ -279,7 +280,7 @@ class ducklakeSink(BatchSink):
             memory_diff_mb = memory_after_mb - memory_before_mb
             self.logger.info(
                 f"[Memory] After write_temp_file for {self.stream_name}: {memory_after_mb:.2f} MB (was {memory_before_mb:.2f} MB at start)"
-                f"(delta: {memory_diff_mb:+.2f} MB, {memory_diff_mb/memory_before_mb*100:.2f}%)"
+                f"(delta: {memory_diff_mb:+.2f} MB, {memory_diff_mb / memory_before_mb * 100:.2f}%)"
             )
 
             return full_temp_file_path
