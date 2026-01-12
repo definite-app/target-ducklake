@@ -14,7 +14,7 @@ import psutil
 import pyarrow.parquet as pq
 from singer_sdk import Target
 
-from singer_sdk.sinks import BatchSink
+from singer_sdk.sinks import SQLSink
 
 from target_ducklake.connector import DuckLakeConnector
 from target_ducklake.flatten import flatten_record, flatten_schema
@@ -24,8 +24,10 @@ from target_ducklake.parquet_utils import (
 )
 
 
-class ducklakeSink(BatchSink):
+class ducklakeSink(SQLSink):
     """ducklake target sink class."""
+
+    connector_class = DuckLakeConnector
 
     def __init__(
         self,
@@ -33,8 +35,11 @@ class ducklakeSink(BatchSink):
         stream_name: str,
         schema: dict,
         key_properties: Sequence[str] | None,
+        connector: DuckLakeConnector | None = None,
     ) -> None:
-        super().__init__(target, stream_name, schema, key_properties)
+        super().__init__(
+            target, stream_name, schema, key_properties, connector=connector
+        )
 
         self.base_temp_file_dir = self.config.get("temp_file_dir", "temp_files/")
         self.temp_file_dir = os.path.join(
@@ -46,9 +51,6 @@ class ducklakeSink(BatchSink):
         # NOTE: we probably don't need all this logging, but useful for debugging while target is in development
         # Log original schema for debugging
         self.logger.info(f"Original schema for stream '{stream_name}': {self.schema}")
-
-        # Use the connector for database operations
-        self.connector = DuckLakeConnector(dict(self.config))
 
         # Create pyarrow and Ducklake schemas
         self.flatten_max_level = self.config.get("flatten_max_level", 0)

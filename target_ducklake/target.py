@@ -6,15 +6,19 @@ import ast
 import logging
 
 from singer_sdk import typing as th
-from singer_sdk.target_base import Target
+from singer_sdk.target_base import SQLTarget
 
 from target_ducklake.sinks import (
     ducklakeSink,
 )
 
 
-class Targetducklake(Target):
+class Targetducklake(SQLTarget):
     name = "target-ducklake"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.max_parallelism = 1  # Disable parallel draining
 
     @property
     def config(self):
