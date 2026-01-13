@@ -357,6 +357,32 @@ class ducklakeSink(SQLSink):
                     f"Non-fatal error during temp directory cleanup for {self.stream_name}: {e}"
                 )
 
+    def activate_version(self, new_version: int) -> None:
+        """Handle ACTIVATE_VERSION message.
+
+        Override the base class method.
+        TODO: figure out if this affects other taps, for now we only needed to add this for tap-redshift:
+        https://github.com/definite-app/tap-redshift/blob/6f5b84471537dd8004cb54931e920163bb11d39e/tap_redshift/__init__.py#L366
+        """
+        self.logger.info(
+            f"Activate version {new_version} for stream {self.stream_name}"
+        )
+
+        # Check if table exists using our DuckDB-based method
+        if not self.connector._check_if_table_exists(
+            self.target_schema, self.target_table
+        ):
+            self.logger.info(
+                f"Table {self.target_schema}.{self.target_table} does not exist, "
+                "skipping version activation"
+            )
+            return
+
+        # For now, just log the version activation
+        self.logger.info(
+            f"Version {new_version} activated for {self.target_schema}.{self.target_table}"
+        )
+
 
 def stream_name_to_dict(stream_name, separator="-"):
     catalog_name = None
