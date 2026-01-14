@@ -14,7 +14,7 @@ import psutil
 import pyarrow.parquet as pq
 from singer_sdk import Target
 
-from singer_sdk.sinks import BatchSink
+from singer_sdk.sinks import SQLSink
 
 from target_ducklake.connector import DuckLakeConnector
 from target_ducklake.flatten import flatten_record, flatten_schema
@@ -24,8 +24,10 @@ from target_ducklake.parquet_utils import (
 )
 
 
-class ducklakeSink(BatchSink):
+class ducklakeSink(SQLSink):
     """ducklake target sink class."""
+
+    connector_class = DuckLakeConnector
 
     def __init__(
         self,
@@ -33,8 +35,11 @@ class ducklakeSink(BatchSink):
         stream_name: str,
         schema: dict,
         key_properties: Sequence[str] | None,
+        connector: DuckLakeConnector | None = None,
     ) -> None:
-        super().__init__(target, stream_name, schema, key_properties)
+        super().__init__(
+            target, stream_name, schema, key_properties, connector=connector
+        )
 
         self.base_temp_file_dir = self.config.get("temp_file_dir", "temp_files/")
         self.temp_file_dir = os.path.join(
@@ -46,9 +51,6 @@ class ducklakeSink(BatchSink):
         # NOTE: we probably don't need all this logging, but useful for debugging while target is in development
         # Log original schema for debugging
         self.logger.info(f"Original schema for stream '{stream_name}': {self.schema}")
-
-        # Use the connector for database operations
-        self.connector = DuckLakeConnector(dict(self.config))
 
         # Create pyarrow and Ducklake schemas
         self.flatten_max_level = self.config.get("flatten_max_level", 0)
@@ -186,6 +188,12 @@ class ducklakeSink(BatchSink):
         """Remove duplicates within PyArrow table based on key properties."""
         if not self.key_properties or pyarrow_df is None:
             return pyarrow_df
+
+        # Lowercase column names, SQLSink parent class cleans schema objects to lowercase
+        # https://github.com/meltano/sdk/blob/43502d246e94c5f51252dc7d00c758be8e6500f7/singer_sdk/sql/sink.py#L206
+        pyarrow_df = pyarrow_df.rename_columns(
+            [col.lower() for col in pyarrow_df.column_names]
+        )
 
         # Check that all key properties exist in the pyarrow table
         available_columns = set(pyarrow_df.column_names)
@@ -354,6 +362,32 @@ class ducklakeSink(BatchSink):
                 self.logger.warning(
                     f"Non-fatal error during temp directory cleanup for {self.stream_name}: {e}"
                 )
+
+    def activate_version(self, new_version: int) -> None:
+        """Handle ACTIVATE_VERSION message.
+
+        Override the base class method.
+        TODO: figure out if this affects other taps, for now we only needed to add this for tap-redshift:
+        https://github.com/definite-app/tap-redshift/blob/6f5b84471537dd8004cb54931e920163bb11d39e/tap_redshift/__init__.py#L366
+        """
+        self.logger.info(
+            f"Activate version {new_version} for stream {self.stream_name}"
+        )
+
+        # Check if table exists using our DuckDB-based method
+        if not self.connector._check_if_table_exists(
+            self.target_schema, self.target_table
+        ):
+            self.logger.info(
+                f"Table {self.target_schema}.{self.target_table} does not exist, "
+                "skipping version activation"
+            )
+            return
+
+        # For now, just log the version activation
+        self.logger.info(
+            f"Version {new_version} activated for {self.target_schema}.{self.target_table}"
+        )
 
 
 def stream_name_to_dict(stream_name, separator="-"):

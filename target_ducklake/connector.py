@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 import duckdb
 from singer_sdk.connectors.sql import JSONSchemaToSQL
+from singer_sdk.connectors import SQLConnector
 from sqlalchemy.types import BIGINT, DECIMAL, INTEGER, JSON
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class JSONSchemaToDuckLake(JSONSchemaToSQL):
         return DECIMAL(max_precision, default_scale)
 
 
-class DuckLakeConnector:
+class DuckLakeConnector(SQLConnector):
     """Handles DuckLake database connections and setup."""
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -74,7 +75,7 @@ class DuckLakeConnector:
         Raises:
             DuckLakeConnectorError: If required configuration is missing
         """
-        self.config = config
+        super().__init__(config=config)
         self._validate_config()
 
         self.catalog_url = config.get("catalog_url")
@@ -228,7 +229,7 @@ class DuckLakeConnector:
         """
         try:
             logger.debug(f"Executing query: {query}")
-            return self.connection.execute(query, parameters)
+            return self.connection.cursor().execute(query, parameters)
         except Exception as e:
             raise DuckLakeConnectorError(f"Query {query} failed with error: {e}") from e
 
