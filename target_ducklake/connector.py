@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any, Dict, Optional
 
 import duckdb
@@ -262,11 +263,13 @@ class DuckLakeConnector(SQLConnector):
                 result = self.execute(check_table_query)
                 return result.fetchone()[0] > 0
             except Exception as e:
+                sleep_time = 2 ** attempt
                 logger.warning(
-                    f"Failed to check if table {table_name} exists (attempt {attempt}/{max_retries}): {e}"
+                    f"Failed to check if table {table_name} exists (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_time}s..."
                 )
                 if attempt == max_retries:
                     raise
+                time.sleep(sleep_time)
 
     def get_table_columns(
         self, target_schema_name: str, table_name: str, max_retries: int = 3
@@ -281,11 +284,13 @@ class DuckLakeConnector(SQLConnector):
                 result = self.execute(get_columns_query).fetchall()
                 return [col[1] for col in result]
             except Exception as e:
+                sleep_time = 2 ** attempt
                 logger.warning(
-                    f"Failed to get columns for table {table_name} (attempt {attempt}/{max_retries}): {e}"
+                    f"Failed to get columns for table {table_name} (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_time}s..."
                 )
                 if attempt == max_retries:
                     raise
+                time.sleep(sleep_time)
 
     def _add_columns(
         self,
