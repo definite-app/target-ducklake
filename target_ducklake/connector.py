@@ -243,7 +243,9 @@ class DuckLakeConnector(SQLConnector):
         )
         self.execute(create_schema_query)
 
-    def _check_if_table_exists(self, target_schema_name: str, table_name: str) -> bool:
+    def _check_if_table_exists(
+        self, target_schema_name: str, table_name: str, max_retries: int = 3
+    ) -> bool:
         """Check if the table exists in the target schema."""
         check_table_query = f"""
         SELECT
@@ -252,14 +254,38 @@ class DuckLakeConnector(SQLConnector):
             WHERE table_schema = '{target_schema_name}'
             AND table_name   = '{table_name}';
         """
-        result = self.execute(check_table_query)
-        return result.fetchone()[0] > 0
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(
+                    f"Checking if table {table_name} exists (attempt {attempt}/{max_retries})"
+                )
+                result = self.execute(check_table_query)
+                return result.fetchone()[0] > 0
+            except Exception as e:
+                logger.warning(
+                    f"Failed to check if table {table_name} exists (attempt {attempt}/{max_retries}): {e}"
+                )
+                if attempt == max_retries:
+                    raise
 
-    def get_table_columns(self, target_schema_name: str, table_name: str) -> list[str]:
+    def get_table_columns(
+        self, target_schema_name: str, table_name: str, max_retries: int = 3
+    ) -> list[str]:
         """Get the columns of the table."""
         get_columns_query = f"PRAGMA TABLE_INFO('{self.catalog_name}.{target_schema_name}.{table_name}');"
-        result = self.execute(get_columns_query).fetchall()
-        return [col[1] for col in result]
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(
+                    f"Getting columns for table {table_name} (attempt {attempt}/{max_retries})"
+                )
+                result = self.execute(get_columns_query).fetchall()
+                return [col[1] for col in result]
+            except Exception as e:
+                logger.warning(
+                    f"Failed to get columns for table {table_name} (attempt {attempt}/{max_retries}): {e}"
+                )
+                if attempt == max_retries:
+                    raise
 
     def _add_columns(
         self,
