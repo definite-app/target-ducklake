@@ -34,6 +34,9 @@ Supports append, merge, and overwrite load methods (default is merge). The load 
 | `convert_tz_to_utc` | boolean | ❌ | `false` | When True, automatically converts timezone of timestamp-like fields to UTC |
 | `validate_records` | boolean | ❌ | `false` | Whether to validate the schema of the incoming streams |
 | `overwrite_if_no_pk` | boolean | ❌ | `false` | When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method. |
+| `endpoint` | string | ❌ | - | Endpoint for custom S3 storage (optional) |
+| `url_style` | string | ❌ | - | Either vhost or path (optional) |
+| `use_ssl` | boolean | ❌ | - | Wether to use HTTP or HTTPS when connecting to S3 (optional) |
 
 ### Example Meltano YAML Configuration
 
@@ -68,7 +71,7 @@ Example:
 
 ```json
 {
-    "stream_name": [    
+    "stream_name": [
         {
             "column_name": "created_at", # The column name to partition on
             "type": "timestamp", # The partition type (timestamp or identifier)
