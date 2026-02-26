@@ -234,8 +234,42 @@ class DuckLakeConnector(SQLConnector):
         except Exception as e:
             raise DuckLakeConnectorError(f"Query {query} failed with error: {e}") from e
 
+    def _check_if_schema_exists(
+        self, target_schema_name: str, max_retries: int = 3
+    ) -> bool:
+        """Check if the schema exists in the catalog."""
+        check_schema_query = f"""
+        SELECT
+            COUNT(*) AS cnt
+        FROM information_schema.schemata
+            WHERE catalog_name = '{self.catalog_name}'
+            AND schema_name = '{target_schema_name}';
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(
+                    f"Checking if schema {target_schema_name} exists (attempt {attempt}/{max_retries})"
+                )
+                result = self.execute(check_schema_query)
+                return result.fetchone()[0] > 0
+            except Exception as e:
+                sleep_time = 2 ** attempt
+                logger.warning(
+                    f"Failed to check if schema {target_schema_name} exists (attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_time}s..."
+                )
+                if attempt == max_retries:
+                    raise
+                time.sleep(sleep_time)
+        return False  # unreachable: last attempt either returns or raises (shuts linter up)
+
     def prepare_target_schema(self, target_schema_name: str) -> None:
         """Prepare the schema for the target table."""
+        if self._check_if_schema_exists(target_schema_name):
+            logger.info(
+                f"Schema {target_schema_name} already exists in catalog {self.catalog_name}. Skipping creation."
+            )
+            return
+        logger.info(f"Schema {target_schema_name} does not exist in catalog {self.catalog_name}. Creating schema.")
         create_schema_query = (
             f"CREATE SCHEMA IF NOT EXISTS {self.catalog_name}.{target_schema_name};"
         )
@@ -270,8 +304,9 @@ class DuckLakeConnector(SQLConnector):
                 if attempt == max_retries:
                     raise
                 time.sleep(sleep_time)
+        return False  # unreachable: last attempt either returns or raises (shuts linter up)
 
-    def get_table_columns(
+    def get_table_columns( # type: ignore[override]
         self, target_schema_name: str, table_name: str, max_retries: int = 3
     ) -> list[str]:
         """Get the columns of the table."""
@@ -291,6 +326,7 @@ class DuckLakeConnector(SQLConnector):
                 if attempt == max_retries:
                     raise
                 time.sleep(sleep_time)
+        return []  # unreachable: last attempt either returns or raises (shuts linter up)
 
     def _add_columns(
         self,
@@ -323,7 +359,7 @@ class DuckLakeConnector(SQLConnector):
         )
         self.execute(create_table_query)
 
-    def prepare_table(
+    def prepare_table( # type: ignore[override]
         self,
         target_schema_name: str,
         table_name: str,
@@ -337,6 +373,7 @@ class DuckLakeConnector(SQLConnector):
         Returns all columns in the table and order in which they appear.
         """
         if not self._check_if_table_exists(target_schema_name, table_name):
+            logger.info(f"Table {table_name} does not exist in schema {target_schema_name}. Creating empty table.")
             self._create_empty_table(target_schema_name, table_name, columns)
         else:
             logger.info(
