@@ -387,6 +387,8 @@ class DuckLakeConnector(SQLConnector):
             if new_columns:
                 logger.info(f"Adding new columns to table {table_name}: {new_columns}")
                 self._add_columns(target_schema_name, table_name, new_columns)
+            else:
+                logger.info(f"Columns match for table {table_name}. No new columns to add.")
 
         # truncate the table if necessary
         if overwrite_table:
