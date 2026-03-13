@@ -281,6 +281,25 @@ class Targetducklake(SQLTarget):
             title="Overwrite If No Primary Key",
             description="When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method.",
         ),
+        th.Property(
+            "endpoint",
+            th.StringType(nullable=True),
+            title="Endpoint",
+            description="Specify a custom S3 endpoint (optional)",
+        ),
+        th.Property(
+            "url_style",
+            th.StringType(allowed_values=["vhost", "path"]),
+            title="URL Style",
+            description="Specify a custom S3 URL style, either vhost or path (optional)",
+        ),
+        th.Property(
+            "use_ssl",
+            th.BooleanType(),
+            default=True,
+            title="Use SSL",
+            description="Whether to use HTTPS or HTTP when connecting to S3",
+        ),
     ).to_dict()
 
     default_sink_class = ducklakeSink

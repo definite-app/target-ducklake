@@ -74,6 +74,10 @@ class TestTargetducklakeConfig:
             "public_key": "test_key",
             "secret_key": "test_secret",
             "region": "us-east-1",
+            "use_ssl": False,
+            "endpoint": "localhost:9876",
+            "url_style": "path",
+
         }
         target = Targetducklake(config=config)
         assert target.config["storage_type"] == "S3"
