@@ -36,7 +36,7 @@ uv run target-ducklake --version
 Key files:
 - `target_ducklake/target.py` — `Targetducklake(SQLTarget)`: config parsing, entry point
 - `target_ducklake/sinks.py` — `ducklakeSink(SQLSink)`: record processing, batching, parquet temp files, load methods (append/merge/overwrite)
-- `target_ducklake/connector.py` — `DuckLakeConnector(SQLConnector)`: DuckDB connection, DDL, insert/merge operations, retry logic with exponential backoff
+- `target_ducklake/connector.py` — `DuckLakeConnector(SQLConnector)`: DuckDB connection, DDL, insert/merge operations, centralized retry logic in `execute()`
 - `target_ducklake/flatten.py` — Schema/record flattening, auto-timestamp casting
 - `target_ducklake/parquet_utils.py` — PyArrow schema conversion, datetime normalization
 - `target_ducklake/logger.py` — Logging config
@@ -53,6 +53,16 @@ Key files:
 ## Testing
 
 Tests are in `tests/test_comprehensive.py`. All tests are unit tests using mocks — no external database connections needed. Run with `uv run pytest tests/ -v`.
+
+## Retry Logic
+
+All queries go through `DuckLakeConnector.execute()`, which retries on `duckdb.IOException` (covers Postgres catalog connectivity errors and S3/GCS storage errors via `duckdb.HTTPException`, a subclass). Non-IOException errors are raised immediately without retry.
+
+- **Max retries:** 3 attempts (configurable via `max_retries` parameter)
+- **Backoff:** Exponential — `2^attempt` seconds (2s, 4s, 8s)
+- **Retried errors:** Only `duckdb.IOException` (transient infrastructure/connectivity failures)
+- **Not retried:** Programming errors, type mismatches, constraint violations, etc.
+- **DML safety:** `insert_into_table` and `merge_into_table` wrap operations in `BEGIN TRANSACTION` / `COMMIT`, so failed attempts are rolled back before retry
 
 ## Key Dependencies
 
