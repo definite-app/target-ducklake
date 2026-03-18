@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import os
 import shutil
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
-import uuid
 
 import polars as pl
 import psutil
 import pyarrow.parquet as pq
 from singer_sdk import Target
-
 from singer_sdk.sinks import SQLSink
 
 from target_ducklake.connector import DuckLakeConnector
@@ -300,7 +299,6 @@ class ducklakeSink(SQLSink):
 
     def process_batch(self, context: dict) -> None:
         """Process a batch of records."""
-
         # first write each batch to a parquet file
         temp_file_path = self.write_temp_file(context)
         self.logger.info(f"Temp file path: {temp_file_path}")

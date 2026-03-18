@@ -6,7 +6,7 @@ https://github.com/meltano/sdk/blob/35b499d6163f91752fd674f2a3e46a7e22a1fb47/sin
 import collections
 import itertools
 import json
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
 
 TIMESTAMP_COLUMN_NAMES = {
@@ -28,9 +28,9 @@ class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)  # Convert Decimal to float
-        elif isinstance(obj, datetime):
+        if isinstance(obj, datetime):
             return obj.isoformat()  # Convert datetime to ISO format string
-        elif isinstance(obj, date):
+        if isinstance(obj, date):
             return obj.isoformat()  # Convert date to ISO format string
         return super().default(obj)
 
@@ -107,8 +107,7 @@ def flatten_record(
 def flatten_schema(
     d, parent_key=[], sep="__", level=0, max_level=0, auto_cast_timestamps=False
 ):
-    """
-    This function is a bit of a blackbox. Adapted from DuckDB target and Meltano SDK.
+    """This function is a bit of a blackbox. Adapted from DuckDB target and Meltano SDK.
     See note mentioned here in official Meltano SDK repo:
     https://github.com/meltano/sdk/blob/35b499d6163f91752fd674f2a3e46a7e22a1fb47/singer_sdk/helpers/_flattening.py#L342
     """
@@ -181,8 +180,7 @@ def flatten_schema(
 
 # pylint: disable=redefined-outer-name
 def _should_json_dump_value(key, value, flatten_schema=None):
-    """
-    Adapted from here: https://github.com/jwills/target-duckdb/blob/36c8ce68a0b2584c4bbb07325482968b1edc0c40/target_duckdb/db_sync.py#L125
+    """Adapted from here: https://github.com/jwills/target-duckdb/blob/36c8ce68a0b2584c4bbb07325482968b1edc0c40/target_duckdb/db_sync.py#L125
     """
     if isinstance(value, (dict, list)):
         return True

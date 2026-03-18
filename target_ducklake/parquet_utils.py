@@ -127,7 +127,7 @@ def concat_tables(
     if convert_tz_to_utc:
         datetime_fields = [
             field
-            for field in flattened_schema.keys()
+            for field in flattened_schema
             if "format" in flattened_schema[field]
             and flattened_schema[field]["format"] == "date-time"
         ]
