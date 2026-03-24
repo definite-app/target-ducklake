@@ -37,7 +37,7 @@ Key files:
 - `target_ducklake/target.py` — `Targetducklake(SQLTarget)`: config parsing, entry point
 - `target_ducklake/sinks.py` — `ducklakeSink(SQLSink)`: record processing, batching, parquet temp files, load methods (append/merge/overwrite)
 - `target_ducklake/connector.py` — `DuckLakeConnector(SQLConnector)`: DuckDB connection, DDL, insert/merge operations, centralized retry logic in `execute()`
-- `target_ducklake/flatten.py` — Schema/record flattening, auto-timestamp casting
+- `target_ducklake/flatten.py` — Schema/record flattening, auto-timestamp casting, column name truncation
 - `target_ducklake/parquet_utils.py` — PyArrow schema conversion, datetime normalization
 - `target_ducklake/logger.py` — Logging config
 
@@ -65,6 +65,16 @@ All queries go through `DuckLakeConnector.execute()`, which retries on `duckdb.I
 - **DML safety:** `insert_into_table` and `merge_into_table` wrap operations in `BEGIN TRANSACTION` / `COMMIT`, so failed attempts are rolled back before retry
 - **No reconnect needed:** On retry, we do NOT need to DETACH + re-ATTACH the DuckLake catalog. The DuckDB `postgres` extension uses a connection pool (`PostgresConnectionPool`) that calls `PQreset()` on bad connections when they are returned to the pool. After a failed query, the next retry gets a repaired or fresh Postgres connection automatically. See: [postgres_connection_pool.cpp#L93-L99](https://github.com/duckdb/duckdb-postgres/blob/main/src/storage/postgres_connection_pool.cpp#L93-L99)
 - **`ducklake_max_retry_count` does NOT cover connectivity errors.** DuckLake's internal retry loop only retries concurrency conflicts (primary key/unique violations, conflict errors) during transaction commit. Postgres "Connection refused" errors are NOT retried by DuckLake — our `execute()` retry is the only layer handling these. See: [ducklake_transaction.cpp#L2518-L2531](https://github.com/duckdb/ducklake/blob/main/src/storage/ducklake_transaction.cpp#L2518-L2531)
+
+## Column Name Truncation
+
+When `catalog_type` is `postgres`, column names longer than 63 characters are automatically truncated to match PostgreSQL's identifier length limit (NAMEDATALEN). This is a workaround for [ducklake#619](https://github.com/duckdb/ducklake/issues/619).
+
+- Controlled by `max_column_length` config (default 63, set to 0 to disable)
+- Only applies when `catalog_type == "postgres"`
+- Collision handling: if truncation produces duplicate names, columns are shortened further and given `_{i}` suffixes
+- Implementation: `truncate_column_names()` in `flatten.py`, called via `ducklakeSink._apply_column_name_truncation()` in `sinks.py`
+- The truncation mapping is also applied to `key_properties` and to each record in `process_record()`
 
 ## Key Dependencies
 
