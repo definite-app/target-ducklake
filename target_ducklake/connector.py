@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import duckdb
 from singer_sdk.connectors import SQLConnector
@@ -67,7 +67,7 @@ class JSONSchemaToDuckLake(JSONSchemaToSQL):
 class DuckLakeConnector(SQLConnector):
     """Handles DuckLake database connections and setup."""
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         """Initialize the DuckLake connector with configuration.
 
         Args:
@@ -463,7 +463,7 @@ class DuckLakeConnector(SQLConnector):
         file_columns: list[str],
         target_table_columns: list[str],
         key_properties: list[str],
-        date_type_keys: list[Optional[str]] = [],
+        date_type_keys: list[str | None] = [],
     ):
         """Merge data from a parquet file into the table using DELETE+INSERT.
 

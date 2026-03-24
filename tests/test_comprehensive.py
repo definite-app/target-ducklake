@@ -21,6 +21,7 @@ from target_ducklake.flatten import (
     _should_auto_cast_to_timestamp,
     flatten_record,
     flatten_schema,
+    truncate_column_names,
 )
 from target_ducklake.parquet_utils import (
     _field_type_to_pyarrow_field,
@@ -614,3 +615,110 @@ class TestExecuteRetry:
 
         assert mock_cursor.execute.call_count == 1
         mock_sleep.assert_not_called()
+
+
+class TestTruncateColumnNames:
+    """Test column name truncation for Postgres compatibility."""
+
+    def test_no_truncation_needed(self):
+        """Names within limit are unchanged, mapping is empty."""
+        schema = {"id": {"type": "integer"}, "name": {"type": "string"}}
+        new_schema, mapping = truncate_column_names(schema, max_length=63)
+        assert new_schema == schema
+        assert mapping == {}
+
+    def test_simple_truncation(self):
+        """A single long name is truncated to max_length."""
+        long_name = "a" * 80
+        schema = {long_name: {"type": "string"}, "id": {"type": "integer"}}
+        new_schema, mapping = truncate_column_names(schema, max_length=63)
+
+        assert long_name not in new_schema
+        truncated = "a" * 63
+        assert truncated in new_schema
+        assert mapping == {long_name: truncated}
+        # Schema values are preserved
+        assert new_schema[truncated] == {"type": "string"}
+        assert new_schema["id"] == {"type": "integer"}
+
+    def test_collision_resolution(self):
+        """Two names that truncate to the same string get _{i} suffixes."""
+        prefix = "a" * 63
+        name_a = prefix + "_suffix_one"
+        name_b = prefix + "_suffix_two"
+        schema = {name_a: {"type": "string"}, name_b: {"type": "integer"}}
+        new_schema, mapping = truncate_column_names(schema, max_length=63)
+
+        # Both should be in the new schema with different names
+        assert len(new_schema) == 2
+        values = list(new_schema.keys())
+        assert values[0] != values[1]
+        # Each should end with _0 or _1
+        assert values[0].endswith("_0")
+        assert values[1].endswith("_1")
+        # Total length should not exceed max_length
+        assert all(len(v) <= 63 for v in values)
+
+    def test_disabled_with_zero(self):
+        """max_length=0 disables truncation."""
+        long_name = "a" * 100
+        schema = {long_name: {"type": "string"}}
+        new_schema, mapping = truncate_column_names(schema, max_length=0)
+        assert new_schema == schema
+        assert mapping == {}
+
+    def test_postgres_only_in_sink(self):
+        """Truncation is skipped for non-postgres catalog types."""
+        long_name = "a" * 80
+        schema = {
+            "type": "object",
+            "properties": {long_name: {"type": "string"}},
+        }
+        config = {
+            "catalog_url": "test.db",
+            "data_path": "/tmp/test",
+            "storage_type": "local",
+            "catalog_type": "duckdb",
+        }
+        with patch("target_ducklake.sinks.DuckLakeConnector"):
+            target = Mock()
+            target.config = config
+            sink = ducklakeSink(
+                target=target,
+                stream_name="test-table",
+                schema=schema,
+                key_properties=None,
+            )
+            # Column name should NOT be truncated for duckdb catalog
+            assert sink._column_name_mapping == {}
+            assert long_name in sink.flatten_schema
+
+    def test_key_properties_truncated(self):
+        """Key properties are updated when their column name is truncated."""
+        long_key = "a" * 80
+        schema = {
+            "type": "object",
+            "properties": {
+                long_key: {"type": "integer"},
+                "name": {"type": "string"},
+            },
+        }
+        config = {
+            "catalog_url": "test.db",
+            "data_path": "/tmp/test",
+            "storage_type": "local",
+            "catalog_type": "postgres",
+        }
+        with patch("target_ducklake.sinks.DuckLakeConnector"):
+            target = Mock()
+            target.config = config
+            sink = ducklakeSink(
+                target=target,
+                stream_name="test-table",
+                schema=schema,
+                key_properties=[long_key],
+            )
+            # Key property should be truncated
+            assert sink.key_properties == ["a" * 63]
+            assert long_key not in sink.flatten_schema
+            assert "a" * 63 in sink.flatten_schema

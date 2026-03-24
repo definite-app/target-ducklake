@@ -16,7 +16,11 @@ from singer_sdk import Target
 from singer_sdk.sinks import SQLSink
 
 from target_ducklake.connector import DuckLakeConnector
-from target_ducklake.flatten import flatten_record, flatten_schema
+from target_ducklake.flatten import (
+    flatten_record,
+    flatten_schema,
+    truncate_column_names,
+)
 from target_ducklake.parquet_utils import (
     concat_tables,
     flatten_schema_to_pyarrow_schema,
@@ -63,6 +67,10 @@ class ducklakeSink(SQLSink):
         self.logger.info(
             f"Flattened schema for stream '{stream_name}': {self.flatten_schema}"
         )
+
+        self._column_name_mapping: dict[str, str] = {}
+        self._apply_column_name_truncation()
+
         self.pyarrow_schema = flatten_schema_to_pyarrow_schema(self.flatten_schema)
         self.ducklake_schema = self.connector.json_to_ducklake_schema(
             self.flatten_schema
@@ -147,6 +155,37 @@ class ducklakeSink(SQLSink):
         """
         return self.config.get("max_batch_size", 10000)
 
+    def _apply_column_name_truncation(self) -> None:
+        """Truncate column names for Postgres catalog compatibility.
+
+        PostgreSQL silently truncates identifiers to 63 characters (NAMEDATALEN),
+        which causes DuckLake binder errors. This method applies the same truncation
+        upfront so all downstream schemas and records use consistent names.
+        See: https://github.com/duckdb/ducklake/issues/619
+        """
+        if self.config.get("catalog_type", "postgres") != "postgres":
+            return
+
+        max_col_length = self.config.get("max_column_length", 63)
+        if max_col_length <= 0:
+            return
+
+        self.flatten_schema, self._column_name_mapping = truncate_column_names(
+            self.flatten_schema, max_length=max_col_length
+        )
+        if self._column_name_mapping:
+            self.logger.info(
+                f"Truncated {len(self._column_name_mapping)} column name(s) "
+                f"to max length {max_col_length}: {self._column_name_mapping}"
+            )
+
+        # Uses _key_properties (the backing attribute) because key_properties is a
+        # read-only property on the parent SQLSink class with no setter.
+        if self._key_properties and self._column_name_mapping:
+            self._key_properties = [
+                self._column_name_mapping.get(kp, kp) for kp in self._key_properties
+            ]
+
     def setup(self) -> None:
         # create the target schema if it doesn't exist
         self.connector.prepare_target_schema(target_schema_name=self.target_schema)
@@ -181,6 +220,12 @@ class ducklakeSink(SQLSink):
             flatten_schema=self.flatten_schema,
             max_level=self.flatten_max_level,
         )
+        # Apply column name truncation mapping
+        if self._column_name_mapping:
+            record_flatten = {
+                self._column_name_mapping.get(k, k): v
+                for k, v in record_flatten.items()
+            }
         super().process_record(record_flatten, context)
 
     def _remove_temp_table_duplicates(self, pyarrow_df):
