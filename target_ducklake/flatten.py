@@ -178,6 +178,52 @@ def flatten_schema(
     return dict(sorted_items)
 
 
+def truncate_column_names(
+    schema: dict, max_length: int = 63
+) -> tuple[dict, dict[str, str]]:
+    """Truncate schema column names to max_length, resolving collisions.
+
+    PostgreSQL truncates identifiers to 63 characters (NAMEDATALEN).
+    This function applies the same truncation to avoid DuckLake binder errors
+    when using a Postgres catalog.
+
+    Returns (new_schema, old_to_new_name_mapping).
+    The mapping only includes names that actually changed.
+
+    Collision resolution: when multiple columns map to the same truncated name,
+    each is shortened further and given a ``_{i}`` suffix (0-indexed).
+    """
+    if max_length <= 0:
+        return schema, {}
+
+    # First pass: truncate names that exceed max_length
+    truncated: dict[str, str] = {}
+    for name in schema:
+        truncated[name] = name[:max_length] if len(name) > max_length else name
+
+    # Detect collisions
+    seen: dict[str, list[str]] = {}
+    for original, trunc in truncated.items():
+        seen.setdefault(trunc, []).append(original)
+
+    # Resolve collisions with _{i} suffixes
+    mapping: dict[str, str] = {}
+    for trunc, originals in seen.items():
+        if len(originals) == 1:
+            original = originals[0]
+            if trunc != original:
+                mapping[original] = trunc
+        else:
+            for i, original in enumerate(originals):
+                suffix = f"_{i}"
+                new_name = trunc[: max_length - len(suffix)] + suffix
+                mapping[original] = new_name
+
+    # Build new schema preserving insertion order
+    new_schema = {mapping.get(name, name): value for name, value in schema.items()}
+    return new_schema, mapping
+
+
 # pylint: disable=redefined-outer-name
 def _should_json_dump_value(key, value, flatten_schema=None):
     """Adapted from here: https://github.com/jwills/target-duckdb/blob/36c8ce68a0b2584c4bbb07325482968b1edc0c40/target_duckdb/db_sync.py#L125

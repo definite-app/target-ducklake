@@ -41,6 +41,8 @@ class Targetducklake(SQLTarget):
             config["max_batch_size"] = int(config.get("max_batch_size", 10000))
         if "flatten_max_level" in config:
             config["flatten_max_level"] = int(config.get("flatten_max_level", 0))
+        if "max_column_length" in config:
+            config["max_column_length"] = int(config.get("max_column_length", 63))
         if "validate_records" in config and isinstance(config["validate_records"], str):
             config["validate_records"] = config["validate_records"].lower() == "true"
         if "overwrite_if_no_pk" in config and isinstance(
@@ -227,6 +229,20 @@ class Targetducklake(SQLTarget):
                 "Object mapping stream names to arrays of partition column definitions. "
                 "Each stream key maps directly to an array of column definitions. "
                 "Can be provided as a JSON string or object."
+            ),
+        ),
+        th.Property(
+            "max_column_length",
+            th.CustomType(
+                {"oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]}
+            ),
+            default=63,
+            title="Max Column Name Length",
+            description=(
+                "Maximum length for column names. Only applied when catalog_type is 'postgres'. "
+                "Names exceeding this limit are truncated to avoid PostgreSQL's 63-character "
+                "identifier limit (NAMEDATALEN). Colliding truncated names get a _{i} suffix. "
+                "Set to 0 to disable truncation."
             ),
         ),
         th.Property(
