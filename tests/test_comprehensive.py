@@ -554,7 +554,7 @@ class TestErrorHandling:
 
 
 class TestExecuteRetry:
-    """Test retry logic in the execute method."""
+    """Test execute method error handling."""
 
     def _make_connector(self):
         config = {
@@ -564,46 +564,8 @@ class TestExecuteRetry:
         }
         return DuckLakeConnector(config)
 
-    @patch("target_ducklake.connector.time.sleep")
-    def test_execute_retries_on_ioexception(self, mock_sleep):
-        """Test that execute retries on duckdb.IOException and succeeds."""
-        connector = self._make_connector()
-        mock_cursor = Mock()
-        mock_result = Mock()
-        mock_cursor.execute.side_effect = [
-            duckdb.IOException("Unable to connect to Postgres"),
-            duckdb.IOException("Unable to connect to Postgres"),
-            mock_result,
-        ]
-        connector._connection = Mock()
-        connector._connection.cursor.return_value = mock_cursor
-
-        result = connector.execute("SELECT 1")
-
-        assert result is mock_result
-        assert mock_cursor.execute.call_count == 3
-        assert mock_sleep.call_count == 2
-        mock_sleep.assert_any_call(2)  # 2^1
-        mock_sleep.assert_any_call(4)  # 2^2
-
-    @patch("target_ducklake.connector.time.sleep")
-    def test_execute_raises_after_max_retries(self, mock_sleep):
-        """Test that execute raises DuckLakeConnectorError after exhausting retries."""
-        connector = self._make_connector()
-        mock_cursor = Mock()
-        mock_cursor.execute.side_effect = duckdb.IOException("Unable to connect to Postgres")
-        connector._connection = Mock()
-        connector._connection.cursor.return_value = mock_cursor
-
-        with pytest.raises(DuckLakeConnectorError, match="failed after 3 attempts"):
-            connector.execute("SELECT 1")
-
-        assert mock_cursor.execute.call_count == 3
-        assert mock_sleep.call_count == 2  # sleeps before attempts 2 and 3
-
-    @patch("target_ducklake.connector.time.sleep")
-    def test_execute_no_retry_on_other_exceptions(self, mock_sleep):
-        """Test that non-IOException errors are raised immediately without retry."""
+    def test_execute_raises_on_exception(self):
+        """Test that exceptions are raised as DuckLakeConnectorError."""
         connector = self._make_connector()
         mock_cursor = Mock()
         mock_cursor.execute.side_effect = duckdb.CatalogException("table not found")
@@ -614,7 +576,6 @@ class TestExecuteRetry:
             connector.execute("SELECT 1")
 
         assert mock_cursor.execute.call_count == 1
-        mock_sleep.assert_not_called()
 
 
 class TestTruncateColumnNames:
