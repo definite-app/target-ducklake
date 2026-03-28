@@ -506,11 +506,14 @@ class DuckLakeConnector(SQLConnector):
         """
 
         logger.info(f"Executing merge operation on table {table_name}")
-        logger.info(f"Delete SQL: {delete_sql}")
-        logger.info(f"Insert SQL: {insert_sql}")
 
+        logger.info(f"Executing delete transaction with SQL {delete_sql}")
         self.execute(delete_sql)
+        logger.info("Finished executing delete transaction")
+
+        logger.info(f"Executing insert transaction with SQL {insert_sql}")
         self.execute(insert_sql)
+        logger.info("Finished executing insert transaction")
 
     def json_to_ducklake_schema(self, schema: dict) -> list[dict[str, str]]:
         """Convert a JSON schema to an array of dictionaries with column name and type.
