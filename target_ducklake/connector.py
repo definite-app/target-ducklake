@@ -448,9 +448,7 @@ class DuckLakeConnector(SQLConnector):
         columns_sql = self._build_columns_sql(file_columns, target_table_columns)
         table_ref = f"{self.catalog_name}.{target_schema_name}.{table_name}"
         insert_sql = f"""
-        BEGIN TRANSACTION;
         INSERT INTO {table_ref} SELECT {columns_sql} FROM '{file_location}';
-        COMMIT;
         """
         logger.info(f"Inserting into table {table_name} with SQL {insert_sql}")
         self.execute(insert_sql)
@@ -494,21 +492,25 @@ class DuckLakeConnector(SQLConnector):
             )
             key_condition = f"({'||'.join(key_properties)})"
 
-        # Build the atomic merge operation
+        # Run DELETE and INSERT as separate transactions so DuckLake's
+        # conflict detection can properly detect and retry conflicts.
+        # See: https://github.com/duckdb/ducklake/pull/906
         table_ref = f"{self.catalog_name}.{target_schema_name}.{table_name}"
-        combined_sql = f"""
-        BEGIN TRANSACTION;
-        DELETE FROM {table_ref} 
+        delete_sql = f"""
+        DELETE FROM {table_ref}
         WHERE {key_condition} IN (SELECT {key_condition} FROM '{file_location}');
-        INSERT INTO {table_ref} 
+        """
+        insert_sql = f"""
+        INSERT INTO {table_ref}
         SELECT {columns_sql} FROM '{file_location}';
-        COMMIT;
         """
 
-        logger.info(f"Executing atomic merge operation on table {table_name}")
-        logger.info(f"Merge SQL: {combined_sql}")
+        logger.info(f"Executing merge operation on table {table_name}")
+        logger.info(f"Delete SQL: {delete_sql}")
+        logger.info(f"Insert SQL: {insert_sql}")
 
-        self.execute(combined_sql)
+        self.execute(delete_sql)
+        self.execute(insert_sql)
 
     def json_to_ducklake_schema(self, schema: dict) -> list[dict[str, str]]:
         """Convert a JSON schema to an array of dictionaries with column name and type.
