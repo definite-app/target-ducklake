@@ -19,7 +19,7 @@ class Targetducklake(SQLTarget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.max_parallelism = 1  # Disables parallel draining
+        # self.max_parallelism = 1  # Disables parallel draining
 
     @property
     def config(self):
