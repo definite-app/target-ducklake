@@ -178,7 +178,7 @@ class DuckLakeConnector(SQLConnector):
             # Build ATTACH parameters
             attach_params = {
                 "DATA_PATH": f"'{self.data_path}'",
-                "DATA_INLINING_ROW_LIMIT": "0",
+                "DATA_INLINING_ROW_LIMIT": 0,
             }
             if self.meta_schema:
                 attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
@@ -187,6 +187,7 @@ class DuckLakeConnector(SQLConnector):
                 f"{key} {value}" for key, value in attach_params.items()
             )
             attach_statement = f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
+        logger.info(f"Attaching DuckLake catalog with statement {attach_statement}")
         script_parts.append(attach_statement)
 
         # Add secrets for cloud storage if configured
