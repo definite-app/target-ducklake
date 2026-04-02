@@ -187,7 +187,6 @@ class DuckLakeConnector(SQLConnector):
                 f"{key} {value}" for key, value in attach_params.items()
             )
             attach_statement = f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
-        logger.info(f"Attaching DuckLake catalog with statement {attach_statement}")
         script_parts.append(attach_statement)
 
         # Add secrets for cloud storage if configured
