@@ -162,7 +162,7 @@ class DuckLakeConnector(SQLConnector):
     def _build_startup_script(self) -> str:
         """Build the DuckDB startup script with extensions and attachments."""
         script_parts = [
-            "INSTALL ducklake;",
+            "FORCE INSTALL ducklake FROM core_nightly;",
             "INSTALL postgres;",
             "SET ducklake_max_retry_count=100;",
         ]
@@ -176,7 +176,10 @@ class DuckLakeConnector(SQLConnector):
             )
         else:
             # Build ATTACH parameters
-            attach_params = {"DATA_PATH": f"'{self.data_path}'"}
+            attach_params = {
+                "DATA_PATH": f"'{self.data_path}'",
+                "DATA_INLINING_ROW_LIMIT": "0",
+            }
             if self.meta_schema:
                 attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
 
