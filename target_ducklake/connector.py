@@ -162,7 +162,7 @@ class DuckLakeConnector(SQLConnector):
     def _build_startup_script(self) -> str:
         """Build the DuckDB startup script with extensions and attachments."""
         script_parts = [
-            "FORCE INSTALL ducklake FROM core_nightly;",
+            "INSTALL ducklake;",
             "INSTALL postgres;",
             "SET ducklake_max_retry_count=100;",
         ]
