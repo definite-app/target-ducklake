@@ -76,6 +76,24 @@ When `catalog_type` is `postgres`, column names longer than 63 characters are au
 - Implementation: `truncate_column_names()` in `flatten.py`, called via `ducklakeSink._apply_column_name_truncation()` in `sinks.py`
 - The truncation mapping is also applied to `key_properties` and to each record in `process_record()`
 
+## GCS Authentication (Definite-specific)
+
+When `storage_type` is `GCS`, the connector supports two authentication modes:
+
+| HMAC keys provided? | Behavior |
+|---|---|
+| Both `public_key` + `secret_key` set | **Legacy path** — public ducklake extension + `TYPE gcs` HMAC secret |
+| Neither set | **ADC path** — Definite-hosted ducklake/gcs extensions + `TYPE GCP, PROVIDER credential_chain` secret (uses GKE service account) |
+
+The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite stopped provisioning HMAC keys for new DuckLake integrations (2026-04-08). Key details:
+
+- Extensions are installed from `DEFINITE_EXTENSION_REPO` (`https://storage.googleapis.com/def-duckdb-extensions`) — the public httpfs-based ducklake doesn't support `TYPE GCP` secrets
+- `allow_unsigned_extensions` is enabled on the DuckDB connection for the Definite-hosted builds
+- Data paths are rewritten from `gs://` to `gcss://` (required by the native `gcs` extension)
+- Mirrors the canonical pattern from defapi `integration_config.py:135-146`
+- Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
+- S3 and local storage paths are completely unchanged
+
 ## Key Dependencies
 
-- `duckdb~=1.4.0`, `singer-sdk~=0.46.4`, `pyarrow>=20.0.0`, `polars>=1.31.0`, `sqlalchemy>=2.0.41`
+- `duckdb==1.5.1`, `singer-sdk~=0.46.4`, `pyarrow>=20.0.0`, `polars>=1.31.0`, `sqlalchemy>=2.0.41`
