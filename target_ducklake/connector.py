@@ -24,6 +24,19 @@ PARTITION_GRANULARITIES = ["year", "month", "day", "hour"]
 # `TYPE GCP` secrets.
 DEFINITE_EXTENSION_REPO = "'https://storage.googleapis.com/def-duckdb-extensions'"
 
+# Postgres error messages that indicate transient connectivity issues.
+# These surface as plain duckdb.Error (not IOException) when DuckLake's
+# internal snapshot query hits a dropped Postgres connection.
+_TRANSIENT_ERROR_PATTERNS = (
+    "SSL connection has been closed unexpectedly",
+)
+
+
+def is_transient_error(error: duckdb.Error) -> bool:
+    """Check if a duckdb.Error is a transient connection issue worth retrying."""
+    msg = str(error)
+    return any(pattern in msg for pattern in _TRANSIENT_ERROR_PATTERNS)
+
 
 class DuckLakeConnectorError(Exception):
     """Custom exception for DuckLake connector errors."""
@@ -307,6 +320,21 @@ class DuckLakeConnector(SQLConnector):
                 sleep_time = 2 ** attempt
                 logger.warning(
                     f"Transient IO error executing query (attempt {attempt}/{max_retries}): {e}. "
+                    f"Retrying in {sleep_time}s..."
+                )
+                if attempt == max_retries:
+                    raise DuckLakeConnectorError(
+                        f"Query {query} failed after {max_retries} attempts with error: {e}"
+                    ) from e
+                time.sleep(sleep_time)
+            except duckdb.Error as e:
+                if not is_transient_error(e):
+                    raise DuckLakeConnectorError(
+                        f"Query {query} failed with error: {e}"
+                    ) from e
+                sleep_time = 2 ** attempt
+                logger.warning(
+                    f"Transient connection error executing query (attempt {attempt}/{max_retries}): {e}. "
                     f"Retrying in {sleep_time}s..."
                 )
                 if attempt == max_retries:

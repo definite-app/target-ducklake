@@ -616,6 +616,42 @@ class TestExecuteRetry:
         assert mock_cursor.execute.call_count == 1
         mock_sleep.assert_not_called()
 
+    @patch("target_ducklake.connector.time.sleep")
+    def test_execute_retries_on_ssl_connection_error(self, mock_sleep):
+        """Test that execute retries on SSL connection errors (duckdb.Error)."""
+        connector = self._make_connector()
+        mock_cursor = Mock()
+        mock_result = Mock()
+        mock_cursor.execute.side_effect = [
+            duckdb.Error("Failed to query most recent snapshot for DuckLake: "
+                         'Failed to execute query "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ": '
+                         "SSL connection has been closed unexpectedly"),
+            mock_result,
+        ]
+        connector._connection = Mock()
+        connector._connection.cursor.return_value = mock_cursor
+
+        result = connector.execute("SELECT 1")
+
+        assert result is mock_result
+        assert mock_cursor.execute.call_count == 2
+        mock_sleep.assert_called_once_with(2)
+
+    @patch("target_ducklake.connector.time.sleep")
+    def test_execute_no_retry_on_non_transient_duckdb_error(self, mock_sleep):
+        """Test that non-transient duckdb.Error is raised immediately."""
+        connector = self._make_connector()
+        mock_cursor = Mock()
+        mock_cursor.execute.side_effect = duckdb.Error("some other error")
+        connector._connection = Mock()
+        connector._connection.cursor.return_value = mock_cursor
+
+        with pytest.raises(DuckLakeConnectorError):
+            connector.execute("SELECT 1")
+
+        assert mock_cursor.execute.call_count == 1
+        mock_sleep.assert_not_called()
+
 
 class TestTruncateColumnNames:
     """Test column name truncation for Postgres compatibility."""
