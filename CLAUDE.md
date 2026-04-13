@@ -56,12 +56,17 @@ Tests are in `tests/test_comprehensive.py`. All tests are unit tests using mocks
 
 ## Retry Logic
 
-All queries go through `DuckLakeConnector.execute()`, which retries on `duckdb.IOException` (covers Postgres catalog connectivity errors and S3/GCS storage errors via `duckdb.HTTPException`, a subclass). Non-IOException errors are raised immediately without retry.
+All queries go through `DuckLakeConnector.execute()`, which retries on two categories of transient errors with exponential backoff:
+
+1. **`duckdb.IOException`** — covers Postgres catalog connectivity errors and S3/GCS storage errors (via `duckdb.HTTPException`, a subclass)
+2. **`duckdb.Error` with transient message** — covers SSL/connection drops that DuckLake wraps in a plain `duckdb.Error` (e.g., "SSL connection has been closed unexpectedly"). Detected by `is_transient_error()` in `connector.py`, which checks against `_TRANSIENT_ERROR_PATTERNS`.
+
+All other exceptions are raised immediately without retry.
 
 - **Max retries:** 3 attempts (configurable via `max_retries` parameter)
 - **Backoff:** Exponential — `2^attempt` seconds (2s, 4s, 8s)
-- **Retried errors:** Only `duckdb.IOException` (transient infrastructure/connectivity failures)
-- **Not retried:** Programming errors, type mismatches, constraint violations, etc.
+- **Retried errors:** `duckdb.IOException` + `duckdb.Error` matching `_TRANSIENT_ERROR_PATTERNS`
+- **Not retried:** Programming errors, type mismatches, constraint violations, non-transient `duckdb.Error`, etc.
 - **DML safety:** `insert_into_table` and `merge_into_table` wrap operations in `BEGIN TRANSACTION` / `COMMIT`, so failed attempts are rolled back before retry
 - **No reconnect needed:** On retry, we do NOT need to DETACH + re-ATTACH the DuckLake catalog. The DuckDB `postgres` extension uses a connection pool (`PostgresConnectionPool`) that calls `PQreset()` on bad connections when they are returned to the pool. After a failed query, the next retry gets a repaired or fresh Postgres connection automatically. See: [postgres_connection_pool.cpp#L93-L99](https://github.com/duckdb/duckdb-postgres/blob/main/src/storage/postgres_connection_pool.cpp#L93-L99)
 - **`ducklake_max_retry_count` does NOT cover connectivity errors.** DuckLake's internal retry loop only retries concurrency conflicts (primary key/unique violations, conflict errors) during transaction commit. Postgres "Connection refused" errors are NOT retried by DuckLake — our `execute()` retry is the only layer handling these. See: [ducklake_transaction.cpp#L2518-L2531](https://github.com/duckdb/ducklake/blob/main/src/storage/ducklake_transaction.cpp#L2518-L2531)
