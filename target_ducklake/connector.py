@@ -189,6 +189,23 @@ class DuckLakeConnector(SQLConnector):
                 f"Failed to create DuckDB connection: {e}"
             ) from e
 
+    def _build_attach_statement(self, data_path: str | None = None) -> str:
+        """Build the ATTACH statement for the DuckLake catalog."""
+        if self.catalog_type == "duckdb":
+            logger.info(
+                f"Detected DuckDB catalog type: {self.catalog_type}. Local DuckDB catalog will be used."
+            )
+            return f"ATTACH 'ducklake:metadata.ducklake' AS {self.catalog_name};"
+
+        attach_params = {"DATA_PATH": f"'{data_path or self.data_path}'"}
+        if self.meta_schema:
+            attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
+
+        params_str = ", ".join(
+            f"{key} {value}" for key, value in attach_params.items()
+        )
+        return f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
+
     def _build_gcp_credential_chain_script(self) -> str:
         """Build startup script for GCS with Application Default Credentials.
 
@@ -209,7 +226,7 @@ class DuckLakeConnector(SQLConnector):
             "LOAD gcs;",
             "LOAD ducklake;",
             "SET ducklake_max_retry_count=100;",
-            f"ATTACH 'ducklake:postgres:{self.catalog_url}' AS {self.catalog_name} (DATA_PATH '{data_path}');",
+            self._build_attach_statement(data_path=data_path),
             (
                 "CREATE SECRET ("
                 "TYPE GCP, "
@@ -231,24 +248,7 @@ class DuckLakeConnector(SQLConnector):
             "SET ducklake_max_retry_count=100;",
         ]
 
-        if self.catalog_type == "duckdb":
-            logger.info(
-                f"Detected DuckDB catalog type: {self.catalog_type}. Local DuckDB catalog will be used."
-            )
-            attach_statement = (
-                f"ATTACH 'ducklake:metadata.ducklake' AS {self.catalog_name};"
-            )
-        else:
-            # Build ATTACH parameters
-            attach_params = {"DATA_PATH": f"'{self.data_path}'"}
-            if self.meta_schema:
-                attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
-
-            params_str = ", ".join(
-                f"{key} {value}" for key, value in attach_params.items()
-            )
-            attach_statement = f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
-        script_parts.append(attach_statement)
+        script_parts.append(self._build_attach_statement())
 
         # Add secrets for cloud storage if configured
         if self.public_key and self.secret_key:
