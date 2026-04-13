@@ -768,6 +768,24 @@ class TestStartupScriptGCSCredentialChain:
         assert "KEY_ID 'ak'" in script
         assert "TYPE GCP" not in script
 
+    def test_credential_chain_includes_meta_schema(self):
+        """META_SCHEMA should appear in the ATTACH statement when configured."""
+        connector = self._make_connector(meta_schema="custom_meta")
+        script = connector._build_startup_script()
+
+        assert "META_SCHEMA 'custom_meta'" in script
+        assert "DATA_PATH 'gcss://def-ducklake/team-abc'" in script
+
+    def test_legacy_path_includes_meta_schema(self):
+        """META_SCHEMA should appear in the ATTACH statement on the legacy HMAC path."""
+        connector = self._make_connector(
+            public_key="ak", secret_key="sk", meta_schema="custom_meta"
+        )
+        script = connector._build_startup_script()
+
+        assert "META_SCHEMA 'custom_meta'" in script
+        assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
+
     def test_use_gcp_credential_chain_predicate(self):
         assert self._make_connector()._use_definite_gcp_credential_chain() is True
         assert self._make_connector(public_key="ak", secret_key="sk")._use_definite_gcp_credential_chain() is False
