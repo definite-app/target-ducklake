@@ -191,7 +191,7 @@ class ducklakeSink(SQLSink):
         self.connector.prepare_target_schema(target_schema_name=self.target_schema)
 
         # prepare the table
-        self.connector.prepare_table(
+        self._table_columns = self.connector.prepare_table(
             target_schema_name=self.target_schema,
             table_name=self.target_table,
             columns=self.ducklake_schema,
@@ -350,9 +350,7 @@ class ducklakeSink(SQLSink):
 
         # get the columns from the file and the table
         file_columns = [col["name"] for col in self.ducklake_schema]
-        table_columns = self.connector.get_table_columns(
-            self.target_schema, self.target_table
-        )
+        table_columns = self._table_columns
 
         # If no key properties, load method is append or overwrite, or table should be overwritten
         # we simply insert the data. Table is already truncated in setup if load method is overwrite
