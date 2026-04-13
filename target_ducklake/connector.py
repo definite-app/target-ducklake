@@ -197,7 +197,10 @@ class DuckLakeConnector(SQLConnector):
             )
             return f"ATTACH 'ducklake:metadata.ducklake' AS {self.catalog_name};"
 
-        attach_params = {"DATA_PATH": f"'{data_path or self.data_path}'"}
+        attach_params = {
+            "DATA_PATH": f"'{data_path or self.data_path}'",
+            "DATA_INLINING_ROW_LIMIT": 0,
+        }
         if self.meta_schema:
             attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
 
