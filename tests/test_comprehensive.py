@@ -722,3 +722,53 @@ class TestTruncateColumnNames:
             assert sink.key_properties == ["a" * 63]
             assert long_key not in sink.flatten_schema
             assert "a" * 63 in sink.flatten_schema
+
+class TestStartupScriptGCSCredentialChain:
+    """Verify GCS-without-HMAC mode installs Definite extensions and creates a GCP secret."""
+
+    def _make_connector(self, **overrides):
+        config = {
+            "catalog_url": "host:5432/db",
+            "data_path": "gs://def-ducklake/team-abc",
+            "storage_type": "GCS",
+        }
+        config.update(overrides)
+        return DuckLakeConnector(config=config)
+
+    def test_credential_chain_mode_when_no_hmac_keys(self):
+        """No HMAC keys -> install custom extensions + TYPE GCP credential_chain SECRET.
+
+        Also verifies the data path is rewritten from `gs://` to `gcss://` for both
+        the ATTACH and the SECRET scope: the native gcs extension (used by the
+        custom ducklake build) only resolves `gcss://` URIs.
+        """
+        connector = self._make_connector()
+        script = connector._build_startup_script()
+
+        assert "INSTALL gcs FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
+        assert "INSTALL ducklake FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
+        assert "LOAD ducklake" in script
+        assert "TYPE GCP" in script
+        assert "PROVIDER credential_chain" in script
+        assert "SCOPE 'gcss://def-ducklake/team-abc'" in script
+        assert "DATA_PATH 'gcss://def-ducklake/team-abc'" in script
+        assert "DATA_PATH 'gs://" not in script  # must not leak the httpfs scheme
+        # Must NOT use the legacy HMAC pattern
+        assert "TYPE gcs," not in script
+        assert "KEY_ID" not in script
+
+    def test_legacy_hmac_path_unchanged_when_keys_present(self):
+        """With both HMAC keys, behavior matches the original path (no custom repo)."""
+        connector = self._make_connector(public_key="ak", secret_key="sk")
+        script = connector._build_startup_script()
+
+        assert "INSTALL ducklake;" in script
+        assert "FROM 'https://storage.googleapis.com/def-duckdb-extensions'" not in script
+        assert "TYPE gcs," in script
+        assert "KEY_ID 'ak'" in script
+        assert "TYPE GCP" not in script
+
+    def test_use_gcp_credential_chain_predicate(self):
+        assert self._make_connector()._use_definite_gcp_credential_chain() is True
+        assert self._make_connector(public_key="ak", secret_key="sk")._use_definite_gcp_credential_chain() is False
+        assert self._make_connector(storage_type="local", data_path="/tmp/x")._use_definite_gcp_credential_chain() is False

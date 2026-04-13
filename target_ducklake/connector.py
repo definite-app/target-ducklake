@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 PARTITION_GRANULARITIES = ["year", "month", "day", "hour"]
 
+# Definite-hosted DuckDB extension repo.
+# Used when authenticating to GCS via Application Default Credentials
+# (credential_chain) instead of HMAC keys. The native `gcs` extension
+# from this repo + the matching `ducklake` extension are required
+# because the public httpfs-based ducklake build does not understand
+# `TYPE GCP` secrets.
+DEFINITE_EXTENSION_REPO = "'https://storage.googleapis.com/def-duckdb-extensions'"
+
 
 class DuckLakeConnectorError(Exception):
     """Custom exception for DuckLake connector errors."""
@@ -143,11 +151,33 @@ class DuckLakeConnector(SQLConnector):
             logger.info("DuckDB and DuckLake catalog connection created.")
         return self._connection
 
+    def _use_definite_gcp_credential_chain(self) -> bool:
+        """Return True when GCS is configured without explicit HMAC keys.
+
+        In this mode we install the Definite-hosted ducklake/gcs extensions
+        and create a `TYPE GCP` secret backed by Application Default
+        Credentials (e.g., the GKE service account on meltano workers).
+        """
+        return (
+            self.storage_type == "GCS"
+            and not self.public_key
+            and not self.secret_key
+        )
+
     def _create_connection(self) -> duckdb.DuckDBPyConnection:
         """Create and configure a new DuckDB connection."""
         try:
             logger.info("Creating DuckDB connection")
-            conn = duckdb.connect(database=":memory:")
+            if self._use_definite_gcp_credential_chain():
+                # Required to install the unsigned, Definite-hosted ducklake/gcs builds.
+                conn = duckdb.connect(
+                    database=":memory:",
+                    config={"allow_unsigned_extensions": True},
+                )
+            else:
+                # Legacy path: don't pass `config` at all, so behavior is bit-identical
+                # to pre-PR for customers on the HMAC / S3 / local flows.
+                conn = duckdb.connect(database=":memory:")
 
             # Execute startup script to configure DuckLake
             startup_script = self._build_startup_script()
@@ -159,8 +189,42 @@ class DuckLakeConnector(SQLConnector):
                 f"Failed to create DuckDB connection: {e}"
             ) from e
 
+    def _build_gcp_credential_chain_script(self) -> str:
+        """Build startup script for GCS with Application Default Credentials.
+
+        Uses Definite-hosted ducklake/gcs extensions that support `TYPE GCP`
+        secrets and the `gcss://` URI scheme. The public httpfs-based ducklake
+        only understands `TYPE gcs` HMAC + `gs://`.
+        Mirrors defapi `integration_config.py:135-146`.
+        """
+        data_path = self.data_path or ""
+        if data_path.startswith("gs://"):
+            data_path = "gcss://" + data_path[len("gs://"):]
+        script_parts = [
+            "INSTALL httpfs;",
+            f"INSTALL gcs FROM {DEFINITE_EXTENSION_REPO};",
+            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
+            "INSTALL postgres;",
+            "LOAD httpfs;",
+            "LOAD gcs;",
+            "LOAD ducklake;",
+            "SET ducklake_max_retry_count=100;",
+            f"ATTACH 'ducklake:postgres:{self.catalog_url}' AS {self.catalog_name} (DATA_PATH '{data_path}');",
+            (
+                "CREATE SECRET ("
+                "TYPE GCP, "
+                "PROVIDER credential_chain, "
+                f"SCOPE '{data_path}'"
+                ");"
+            ),
+        ]
+        return "\n".join(script_parts)
+
     def _build_startup_script(self) -> str:
         """Build the DuckDB startup script with extensions and attachments."""
+        if self._use_definite_gcp_credential_chain():
+            return self._build_gcp_credential_chain_script()
+
         script_parts = [
             "INSTALL ducklake;",
             "INSTALL postgres;",
