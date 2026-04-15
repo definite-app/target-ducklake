@@ -29,6 +29,7 @@ DEFINITE_EXTENSION_REPO = "'https://storage.googleapis.com/def-duckdb-extensions
 # internal snapshot query hits a dropped Postgres connection.
 _TRANSIENT_ERROR_PATTERNS = (
     "SSL connection has been closed unexpectedly",
+    "Failed to get data file list from DuckLake"
 )
 
 
