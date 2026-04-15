@@ -15,11 +15,11 @@ from target_ducklake.sinks import (
 
 class Targetducklake(SQLTarget):
     name = "target-ducklake"
-    _MAX_RECORD_AGE_IN_MINUTES=10.0 # TODO: make this configurable (still experimenting with this)
+    _MAX_RECORD_AGE_IN_MINUTES=5.0 # TODO: make this configurable (still experimenting with this)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # self.max_parallelism = 1  # Disables parallel draining
+        self.max_parallelism = 1  # Disables parallel draining
 
     @property
     def config(self):
