@@ -22,7 +22,6 @@ class Targetducklake(SQLTarget):
         self._MAX_RECORD_AGE_IN_MINUTES = float(
             self.config.get("max_record_age_minutes", 10.0)
         )
-        self.logger.info(f"Max record age in minutes: {self._MAX_RECORD_AGE_IN_MINUTES}")
 
     @property
     def config(self):
