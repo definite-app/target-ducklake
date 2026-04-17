@@ -15,11 +15,14 @@ from target_ducklake.sinks import (
 
 class Targetducklake(SQLTarget):
     name = "target-ducklake"
-    _MAX_RECORD_AGE_IN_MINUTES=10.0 # TODO: make this configurable (still experimenting with this)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # self.max_parallelism = 1  # Disables parallel draining
+        self.max_parallelism = 10 if self.config.get("parallel_draining", True) else 1
+        self._MAX_RECORD_AGE_IN_MINUTES = float(
+            self.config.get("max_record_age_minutes", 10.0)
+        )
+        self.logger.info(f"Max record age in minutes: {self._MAX_RECORD_AGE_IN_MINUTES}")
 
     @property
     def config(self):
@@ -39,6 +42,8 @@ class Targetducklake(SQLTarget):
         if "max_batch_size" in config:
             logging.warning(f"max_batch_size: {config.get('max_batch_size')}")
             config["max_batch_size"] = int(config.get("max_batch_size", 10000))
+        if "max_record_age_minutes" in config:
+            config["max_record_age_minutes"] = float(config["max_record_age_minutes"])
         if "flatten_max_level" in config:
             config["flatten_max_level"] = int(config.get("flatten_max_level", 0))
         if "max_column_length" in config:
@@ -50,6 +55,12 @@ class Targetducklake(SQLTarget):
         ):
             config["overwrite_if_no_pk"] = (
                 config["overwrite_if_no_pk"].lower() == "true"
+            )
+        if "parallel_draining" in config and isinstance(
+            config["parallel_draining"], str
+        ):
+            config["parallel_draining"] = (
+                config["parallel_draining"].lower() == "true"
             )
         return config
 
@@ -296,6 +307,48 @@ class Targetducklake(SQLTarget):
             default=False,
             title="Overwrite If No Primary Key",
             description="When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method.",
+        ),
+        th.Property(
+            "parallel_draining",
+            th.CustomType(
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "String representation of parallel draining flag",
+                        },
+                        {"type": "boolean"},
+                    ]
+                }
+            ),
+            default=True,
+            title="Parallel Draining",
+            description=(
+                "When True, enables parallel draining with max_parallelism=10 "
+                "(Meltano default). When False, sets max_parallelism=1 to "
+                "disable parallel draining."
+            ),
+        ),
+        th.Property(
+            "max_record_age_minutes",
+            th.CustomType(
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "String representation of max record age in minutes",
+                        },
+                        {"type": "number", "exclusiveMinimum": 0},
+                    ]
+                }
+            ),
+            default=10.0,
+            title="Max Record Age (Minutes)",
+            description=(
+                "Maximum age in minutes that records can sit in a sink before a drain "
+                "is forced. Larger values batch more aggressively; smaller values flush "
+                "more often."
+            ),
         ),
     ).to_dict()
 

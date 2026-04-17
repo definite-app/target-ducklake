@@ -35,6 +35,8 @@ Supports append, merge, and overwrite load methods (default is merge). The load 
 | `validate_records` | boolean | ❌ | `false` | Whether to validate the schema of the incoming streams |
 | `overwrite_if_no_pk` | boolean | ❌ | `false` | When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method. |
 | `max_column_length` | integer | ❌ | `63` | Maximum length for column names. Only applied when `catalog_type` is `postgres`. Names exceeding this limit are truncated. Colliding truncated names get a `_{i}` suffix. Set to `0` to disable. See [ducklake#619](https://github.com/duckdb/ducklake/issues/619). |
+| `parallel_draining` | boolean | ❌ | `true` | When True, enables parallel draining with `max_parallelism=10` (Meltano default). When False, sets `max_parallelism=1` to disable parallel draining. |
+| `max_record_age_minutes` | number | ❌ | `10.0` | Maximum age in minutes that records can sit in a sink before a drain is forced. Tune lower for more frequent flushes, higher for larger batches. |
 
 ### Example Meltano YAML Configuration
 
