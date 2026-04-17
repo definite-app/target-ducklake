@@ -214,6 +214,7 @@ class DuckLakeConnector(SQLConnector):
         attach_params = {
             "DATA_PATH": f"'{data_path or self.data_path}'",
             "DATA_INLINING_ROW_LIMIT": 0,
+            # "AUTOMATIC_MIGRATION": True,
         }
         if self.meta_schema:
             attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"

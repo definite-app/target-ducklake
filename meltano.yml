@@ -140,5 +140,11 @@ plugins:
       description: When True, automatically converts timezone of timestamp-like fields to UTC.
       default: false
 
+    - name: parallel_draining
+      kind: boolean
+      label: Parallel Draining
+      description: When True, enables parallel draining with max_parallelism=10 (Meltano default). When False, sets max_parallelism=1 to disable parallel draining.
+      default: true
+
     settings_group_validation:
     - [catalog_url, data_path]

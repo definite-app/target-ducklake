@@ -19,7 +19,7 @@ class Targetducklake(SQLTarget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.max_parallelism = 1  # Disables parallel draining
+        self.max_parallelism = 10 if self.config.get("parallel_draining", True) else 1
 
     @property
     def config(self):
@@ -50,6 +50,12 @@ class Targetducklake(SQLTarget):
         ):
             config["overwrite_if_no_pk"] = (
                 config["overwrite_if_no_pk"].lower() == "true"
+            )
+        if "parallel_draining" in config and isinstance(
+            config["parallel_draining"], str
+        ):
+            config["parallel_draining"] = (
+                config["parallel_draining"].lower() == "true"
             )
         return config
 
@@ -296,6 +302,27 @@ class Targetducklake(SQLTarget):
             default=False,
             title="Overwrite If No Primary Key",
             description="When True, truncates the target table before inserting records if no primary keys are defined in the stream. Overrides load_method.",
+        ),
+        th.Property(
+            "parallel_draining",
+            th.CustomType(
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "String representation of parallel draining flag",
+                        },
+                        {"type": "boolean"},
+                    ]
+                }
+            ),
+            default=True,
+            title="Parallel Draining",
+            description=(
+                "When True, enables parallel draining with max_parallelism=10 "
+                "(Meltano default). When False, sets max_parallelism=1 to "
+                "disable parallel draining."
+            ),
         ),
     ).to_dict()
 
