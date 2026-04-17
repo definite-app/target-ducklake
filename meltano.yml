@@ -146,5 +146,11 @@ plugins:
       description: When True, enables parallel draining with max_parallelism=10 (Meltano default). When False, sets max_parallelism=1 to disable parallel draining.
       default: true
 
+    - name: max_record_age_minutes
+      kind: string
+      label: Max Record Age (Minutes)
+      description: Maximum age in minutes that records can sit in a sink before a drain is forced.
+      default: "10.0"
+
     settings_group_validation:
     - [catalog_url, data_path]
