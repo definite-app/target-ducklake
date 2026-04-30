@@ -243,6 +243,7 @@ class DuckLakeConnector(SQLConnector):
             "LOAD httpfs;",
             "LOAD gcs;",
             "LOAD ducklake;",
+            "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
             # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
             "SET pg_pool_max_connections=64;",
@@ -265,6 +266,7 @@ class DuckLakeConnector(SQLConnector):
         script_parts = [
             "INSTALL ducklake;",
             "INSTALL postgres;",
+            "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
             # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
             "SET pg_pool_max_connections=64;",
