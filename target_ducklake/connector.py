@@ -244,6 +244,8 @@ class DuckLakeConnector(SQLConnector):
             "LOAD gcs;",
             "LOAD ducklake;",
             "SET ducklake_max_retry_count=100;",
+            # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
+            "SET pg_pool_max_connections=64;",
             self._build_attach_statement(data_path=data_path),
             (
                 "CREATE SECRET ("
@@ -264,6 +266,8 @@ class DuckLakeConnector(SQLConnector):
             "INSTALL ducklake;",
             "INSTALL postgres;",
             "SET ducklake_max_retry_count=100;",
+            # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
+            "SET pg_pool_max_connections=64;",
         ]
 
         script_parts.append(self._build_attach_statement())
