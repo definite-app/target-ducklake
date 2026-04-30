@@ -25,6 +25,7 @@ from target_ducklake.parquet_utils import (
     concat_tables,
     flatten_schema_to_pyarrow_schema,
 )
+from target_ducklake.timestamp_coerce import coerce_timestamp_value
 
 
 class ducklakeSink(SQLSink):
@@ -70,6 +71,15 @@ class ducklakeSink(SQLSink):
 
         self._column_name_mapping: dict[str, str] = {}
         self._apply_column_name_truncation()
+
+        # Cache the set of date-time fields. We coerce numeric-epoch values on
+        # these in process_record so DuckLake doesn't try to cast bigints into
+        # TIMESTAMP and overflow.
+        self._datetime_fields: frozenset[str] = frozenset(
+            name
+            for name, entry in self.flatten_schema.items()
+            if isinstance(entry, dict) and entry.get("format") == "date-time"
+        )
 
         self.pyarrow_schema = flatten_schema_to_pyarrow_schema(self.flatten_schema)
         self.ducklake_schema = self.connector.json_to_ducklake_schema(
@@ -226,6 +236,12 @@ class ducklakeSink(SQLSink):
                 self._column_name_mapping.get(k, k): v
                 for k, v in record_flatten.items()
             }
+        # Coerce numeric epoch values in date-time fields (e.g. tap-mixpanel
+        # emits event time as integer ms even when schema says date-time).
+        if self._datetime_fields:
+            for k in self._datetime_fields:
+                if k in record_flatten:
+                    record_flatten[k] = coerce_timestamp_value(record_flatten[k])
         super().process_record(record_flatten, context)
 
     def _remove_temp_table_duplicates(self, pyarrow_df):

@@ -365,6 +365,30 @@ class TestFlattenModule:
         assert result["format"] == "date-time"
         assert result["type"] == "string"
 
+    def test_should_auto_cast_to_timestamp_integer_and_number(self):
+        """Auto-cast must also fire on integer/number epochs (e.g. Mixpanel)."""
+        assert (
+            _should_auto_cast_to_timestamp(
+                "timestamp", {"type": "integer"}, auto_cast_timestamps=True
+            )
+            is True
+        )
+        assert (
+            _should_auto_cast_to_timestamp(
+                "created_at",
+                {"type": ["null", "number"]},
+                auto_cast_timestamps=True,
+            )
+            is True
+        )
+        # Non-numeric, non-string types should still be skipped.
+        assert (
+            _should_auto_cast_to_timestamp(
+                "timestamp", {"type": "boolean"}, auto_cast_timestamps=True
+            )
+            is False
+        )
+
 
 class TestParquetUtils:
     """Test parquet utilities functionality."""

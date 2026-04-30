@@ -54,12 +54,16 @@ def _should_auto_cast_to_timestamp(
     if column_name.lower() not in TIMESTAMP_COLUMN_NAMES:
         return False
 
-    # Check if it's a string type (either single string or list containing string)
+    # String fields are the obvious case (ISO datetimes), but many taps
+    # (notably tap-mixpanel) declare event-time columns as integer/number
+    # epochs. We coerce values to ISO at record-preprocess time, so it is
+    # safe to mark them as date-time here.
+    allowed = {"string", "integer", "number"}
     entry_type = schema_entry.get("type", [])
     if isinstance(entry_type, str):
-        return entry_type == "string"
+        return entry_type in allowed
     if isinstance(entry_type, list):
-        return "string" in entry_type
+        return any(t in allowed for t in entry_type)
 
     return False
 
