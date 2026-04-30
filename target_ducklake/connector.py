@@ -197,11 +197,63 @@ class DuckLakeConnector(SQLConnector):
             startup_script = self._build_startup_script()
             conn.execute(startup_script)
 
+            self._log_pool_settings(conn)
+
             return conn
         except Exception as e:
             raise DuckLakeConnectorError(
                 f"Failed to create DuckDB connection: {e}"
             ) from e
+
+    def _log_pool_settings(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Log the resolved values of the postgres pool settings.
+
+        Diagnostic for verifying that SET pg_pool_* statements actually landed
+        before the PostgresConnectionPool was constructed (which happens at
+        ATTACH time and snapshots these values for the life of the pool).
+        """
+        settings = [
+            "pg_pool_enable_reaper_thread",
+            "pg_pool_idle_timeout_millis",
+            "pg_pool_max_connections",
+            "pg_pool_max_lifetime_millis",
+            "pg_pool_wait_timeout_millis",
+            "pg_pool_enable_thread_local_cache",
+            "pg_connection_limit",
+        ]
+        select_list = ", ".join(f"current_setting('{s}') AS {s}" for s in settings)
+        try:
+            row = conn.execute(f"SELECT {select_list}").fetchone()
+        except Exception:
+            logger.exception("Failed to read pool settings for diagnostic")
+            return
+        resolved = ", ".join(
+            f"{name}={value}" for name, value in zip(settings, row or [], strict=False)
+        )
+        logger.info("Resolved postgres pool settings after startup: %s", resolved)
+
+        # Live pool state: reaper_thread_running, available_connections, etc.
+        # postgres_configure_pool() with no args returns one row per attached
+        # postgres catalog. If `reaper_thread_running` is False here despite
+        # pg_pool_enable_reaper_thread=True, the reaper failed to start and
+        # idle connections will accumulate.
+        try:
+            pool_rows = conn.execute(
+                "SELECT catalog_name, available_connections, max_connections, "
+                "thread_local_cache_enabled, idle_timeout_millis, "
+                "max_lifetime_millis, reaper_thread_running "
+                "FROM postgres_configure_pool()"
+            ).fetchall()
+        except Exception:
+            logger.exception("Failed to read postgres_configure_pool() for diagnostic")
+            return
+        for pool_row in pool_rows:
+            logger.info("Live postgres pool state: %s", dict(zip(
+                ["catalog_name", "available_connections", "max_connections",
+                 "thread_local_cache_enabled", "idle_timeout_millis",
+                 "max_lifetime_millis", "reaper_thread_running"],
+                pool_row, strict=False,
+            )))
 
     def _build_attach_statement(self, data_path: str | None = None) -> str:
         """Build the ATTACH statement for the DuckLake catalog."""
@@ -245,8 +297,19 @@ class DuckLakeConnector(SQLConnector):
             "LOAD ducklake;",
             "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
-            # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
-            "SET pg_pool_max_connections=64;",
+            # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):
+            # before that fix, pg_pool_* options register with default (SESSION)
+            # scope, so plain SET only writes to the user's session — DuckLake's
+            # internal child Connection that runs the postgres ATTACH won't see
+            # them and the pool is built with defaults (no reaper, max=10).
+            "SET GLOBAL pg_pool_max_connections=64;",
+            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
+            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
+            # Disable the thread-local cache: connections parked in per-thread
+            # caches are invisible to the reaper (it only iterates `available`)
+            # and only get evicted when that same thread acquires again. With
+            # parallel draining, idle threads leak their cached connection.
+            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
             self._build_attach_statement(data_path=data_path),
             (
                 "CREATE SECRET ("
@@ -268,8 +331,15 @@ class DuckLakeConnector(SQLConnector):
             "INSTALL postgres;",
             "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
-            # Restore pre-1.5.2 default (duckdb-postgres #427 dropped it to max(num_cpus, 8))
-            "SET pg_pool_max_connections=64;",
+            # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):
+            # before that fix, pg_pool_* options register with default (SESSION)
+            # scope, so plain SET only writes to the user's session — DuckLake's
+            # internal child Connection that runs the postgres ATTACH won't see
+            # them and the pool is built with defaults (no reaper, max=10).
+            "SET GLOBAL pg_pool_max_connections=64;",
+            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
+            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
+            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
         ]
 
         script_parts.append(self._build_attach_statement())
