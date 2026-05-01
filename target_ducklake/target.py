@@ -61,6 +61,12 @@ class Targetducklake(SQLTarget):
             config["parallel_draining"] = (
                 config["parallel_draining"].lower() == "true"
             )
+        if "auto_cast_timestamps" in config and isinstance(
+            config["auto_cast_timestamps"], str
+        ):
+            config["auto_cast_timestamps"] = (
+                config["auto_cast_timestamps"].lower() == "true"
+            )
         return config
 
     config_jsonschema = th.PropertiesList(
@@ -257,7 +263,17 @@ class Targetducklake(SQLTarget):
         ),
         th.Property(
             "auto_cast_timestamps",
-            th.BooleanType(),
+            th.CustomType(
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "String representation of auto cast timestamps flag",
+                        },
+                        {"type": "boolean"},
+                    ]
+                }
+            ),
             default=False,
             title="Auto Cast Timestamps",
             description=(
