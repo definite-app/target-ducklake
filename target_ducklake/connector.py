@@ -112,6 +112,7 @@ class DuckLakeConnector(SQLConnector):
         self._connection: duckdb.DuckDBPyConnection | None = None
         self.catalog_name = "ducklake_catalog"
         self.meta_schema = config.get("meta_schema")
+        self.meta_role = config.get("meta_role")
 
     def _validate_config(self) -> None:
         """Validate required configuration parameters."""
@@ -270,6 +271,8 @@ class DuckLakeConnector(SQLConnector):
         }
         if self.meta_schema:
             attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
+        if self.meta_role:
+            attach_params["META_ROLE"] = f"'{self.meta_role}'"
 
         params_str = ", ".join(
             f"{key} {value}" for key, value in attach_params.items()
