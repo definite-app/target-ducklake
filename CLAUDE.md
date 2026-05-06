@@ -101,4 +101,4 @@ The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite st
 
 ## Key Dependencies
 
-- `duckdb==1.5.1`, `singer-sdk~=0.46.4`, `pyarrow>=20.0.0`, `polars>=1.31.0`, `sqlalchemy>=2.0.41`
+- `duckdb>=1.5.2,<1.6.0`, `singer-sdk~=0.46.4`, `pyarrow>=20.0.0`, `polars>=1.31.0`, `sqlalchemy>=2.0.41`

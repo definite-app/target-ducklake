@@ -822,6 +822,37 @@ class TestStartupScriptGCSCredentialChain:
         assert "META_SCHEMA 'custom_meta'" in script
         assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
 
+    def test_credential_chain_includes_meta_role_when_set(self):
+        """META_ROLE should appear in the ATTACH statement when configured."""
+        connector = self._make_connector(
+            meta_schema="custom_meta", meta_role="user_abc"
+        )
+        script = connector._build_startup_script()
+
+        assert "META_ROLE 'user_abc'" in script
+        assert "META_SCHEMA 'custom_meta'" in script
+        assert script.index("META_SCHEMA") < script.index("META_ROLE")
+
+    def test_credential_chain_omits_meta_role_when_unset(self):
+        """No META_ROLE clause unless the config explicitly provides one."""
+        connector = self._make_connector(meta_schema="custom_meta")
+        script = connector._build_startup_script()
+
+        assert "META_ROLE" not in script
+
+    def test_legacy_path_includes_meta_role_when_set(self):
+        """Legacy HMAC path also forwards META_ROLE through the ATTACH."""
+        connector = self._make_connector(
+            public_key="ak",
+            secret_key="sk",
+            meta_schema="custom_meta",
+            meta_role="user_abc",
+        )
+        script = connector._build_startup_script()
+
+        assert "META_ROLE 'user_abc'" in script
+        assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
+
     def test_use_gcp_credential_chain_predicate(self):
         assert self._make_connector()._use_definite_gcp_credential_chain() is True
         assert self._make_connector(public_key="ak", secret_key="sk")._use_definite_gcp_credential_chain() is False

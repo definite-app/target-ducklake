@@ -87,12 +87,22 @@ class Targetducklake(SQLTarget):
             title="Catalog Type",
             description="Type of catalog database: postgres, sqlite, mysql, or duckdb",
         ),
-        th.Property(
-            "meta_schema",
-            th.StringType(nullable=True),
-            title="Meta Schema",
-            description="Schema name in the catalog database to use for Ducklakemetadata tables",
-        ),
+            th.Property(
+                "meta_schema",
+                th.StringType(nullable=True),
+                title="Meta Schema",
+                description="Schema name in the catalog database to use for Ducklakemetadata tables",
+            ),
+            th.Property(
+                "meta_role",
+                th.StringType(nullable=True),
+                title="Meta Role",
+                description=(
+                    "Optional Postgres role that the Definite-forked DuckLake "
+                    "extension assumes via SET LOCAL ROLE on every metadata "
+                    "transaction."
+                ),
+            ),
         th.Property(
             "data_path",
             th.StringType(nullable=False),
