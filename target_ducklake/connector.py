@@ -183,18 +183,12 @@ class DuckLakeConnector(SQLConnector):
         """Create and configure a new DuckDB connection."""
         try:
             logger.info("Creating DuckDB connection")
-            if self._use_definite_gcp_credential_chain():
-                # Required to install the unsigned, Definite-hosted ducklake/gcs builds.
-                conn = duckdb.connect(
-                    database=":memory:",
-                    config={"allow_unsigned_extensions": True},
-                )
-            else:
-                # Legacy path: don't pass `config` at all, so behavior is bit-identical
-                # to pre-PR for customers on the HMAC / S3 / local flows.
-                conn = duckdb.connect(database=":memory:")
+            # Required to install the unsigned, Definite-hosted ducklake/postgres/gcs builds.
+            conn = duckdb.connect(
+                database=":memory:",
+                config={"allow_unsigned_extensions": True},
+            )
 
-            # Execute startup script to configure DuckLake
             startup_script = self._build_startup_script()
             conn.execute(startup_script)
 
@@ -241,7 +235,7 @@ class DuckLakeConnector(SQLConnector):
             "INSTALL httpfs;",
             f"INSTALL gcs FROM {DEFINITE_EXTENSION_REPO};",
             f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
-            "INSTALL postgres;",
+            f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
             "LOAD httpfs;",
             "LOAD gcs;",
             "LOAD ducklake;",
@@ -273,8 +267,8 @@ class DuckLakeConnector(SQLConnector):
             return self._build_gcp_credential_chain_script()
 
         script_parts = [
-            "INSTALL ducklake;",
-            "INSTALL postgres;",
+            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
+            f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
             "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
             # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):

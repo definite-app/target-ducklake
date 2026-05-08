@@ -783,6 +783,7 @@ class TestStartupScriptGCSCredentialChain:
 
         assert "INSTALL gcs FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
         assert "INSTALL ducklake FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
+        assert "INSTALL postgres FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
         assert "LOAD ducklake" in script
         assert "TYPE GCP" in script
         assert "PROVIDER credential_chain" in script
@@ -793,13 +794,13 @@ class TestStartupScriptGCSCredentialChain:
         assert "TYPE gcs," not in script
         assert "KEY_ID" not in script
 
-    def test_legacy_hmac_path_unchanged_when_keys_present(self):
-        """With both HMAC keys, behavior matches the original path (no custom repo)."""
+    def test_legacy_hmac_path_uses_definite_extensions(self):
+        """With HMAC keys, ducklake/postgres still come from DEFINITE_EXTENSION_REPO."""
         connector = self._make_connector(public_key="ak", secret_key="sk")
         script = connector._build_startup_script()
 
-        assert "INSTALL ducklake;" in script
-        assert "FROM 'https://storage.googleapis.com/def-duckdb-extensions'" not in script
+        assert "INSTALL ducklake FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
+        assert "INSTALL postgres FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
         assert "TYPE gcs," in script
         assert "KEY_ID 'ak'" in script
         assert "TYPE GCP" not in script

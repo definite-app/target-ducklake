@@ -83,21 +83,22 @@ When `catalog_type` is `postgres`, column names longer than 63 characters are au
 
 ## GCS Authentication (Definite-specific)
 
+`ducklake` and `postgres` are always installed from `DEFINITE_EXTENSION_REPO` (`https://storage.googleapis.com/def-duckdb-extensions`), regardless of which startup-script path runs. Because those builds are unsigned, every DuckDB connection is created with `allow_unsigned_extensions=True`.
+
 When `storage_type` is `GCS`, the connector supports two authentication modes:
 
 | HMAC keys provided? | Behavior |
 |---|---|
-| Both `public_key` + `secret_key` set | **Legacy path** — public ducklake extension + `TYPE gcs` HMAC secret |
-| Neither set | **ADC path** — Definite-hosted ducklake/gcs extensions + `TYPE GCP, PROVIDER credential_chain` secret (uses GKE service account) |
+| Both `public_key` + `secret_key` set | **Legacy path** — Definite-hosted ducklake/postgres + `TYPE gcs` HMAC secret over httpfs |
+| Neither set | **ADC path** — Definite-hosted ducklake/postgres/gcs + `TYPE GCP, PROVIDER credential_chain` secret (uses GKE service account) |
 
 The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite stopped provisioning HMAC keys for new DuckLake integrations (2026-04-08). Key details:
 
-- Extensions are installed from `DEFINITE_EXTENSION_REPO` (`https://storage.googleapis.com/def-duckdb-extensions`) — the public httpfs-based ducklake doesn't support `TYPE GCP` secrets
-- `allow_unsigned_extensions` is enabled on the DuckDB connection for the Definite-hosted builds
+- Adds `INSTALL gcs FROM DEFINITE_EXTENSION_REPO` on top of the always-installed ducklake/postgres — the public httpfs-based ducklake doesn't support `TYPE GCP` secrets
 - Data paths are rewritten from `gs://` to `gcss://` (required by the native `gcs` extension)
 - Mirrors the canonical pattern from defapi `integration_config.py:135-146`
 - Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
-- S3 and local storage paths are completely unchanged
+- S3 and local storage paths still install ducklake/postgres from `DEFINITE_EXTENSION_REPO` but otherwise behave like before
 
 ## Branch Model: `main` vs `definite`
 
