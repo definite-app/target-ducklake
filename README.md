@@ -4,6 +4,15 @@
 
 Supports append, merge, and overwrite load methods (default is merge). The load method can be configured using the `load_method` setting. If no key properties are provided and `overwrite_if_no_pk` is true, data will be overwritten. Otherwise, the configured load method determines the behavior.
 
+## Branch Model (Definite-internal)
+
+> This branch (`definite`) is Definite-internal. The public `main` branch does not include the GCS ADC path or `meta_role`.
+
+- **Definite-only change** → branch off `definite`, PR into `definite` (`gh pr create --base definite ...`).
+- **Shared change** → branch off `main`, PR into `main`. After it merges, create `sync/main-into-definite-YYYY-MM-DD` off `definite`, `git merge origin/main`, resolve conflicts (keep BOTH the new shared change AND the Definite-only code), PR into `definite`. Do **not** squash-merge sync PRs and do **not** use `-s ours`.
+
+See `CLAUDE.md` → "Branch Model" for the full flow, scenarios, and gotchas.
+
 ## TODOs
 
 - support deleting data from the target or setting _sdc_deleted_at field (example use-case: syncing from Postgres using log-based change data capture)
