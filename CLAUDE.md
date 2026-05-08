@@ -83,21 +83,42 @@ When `catalog_type` is `postgres`, column names longer than 63 characters are au
 
 ## GCS Authentication (Definite-specific)
 
+`ducklake` and `postgres` are always installed from `DEFINITE_EXTENSION_REPO` (`https://storage.googleapis.com/def-duckdb-extensions`), regardless of which startup-script path runs. Because those builds are unsigned, every DuckDB connection is created with `allow_unsigned_extensions=True`.
+
 When `storage_type` is `GCS`, the connector supports two authentication modes:
 
 | HMAC keys provided? | Behavior |
 |---|---|
-| Both `public_key` + `secret_key` set | **Legacy path** — public ducklake extension + `TYPE gcs` HMAC secret |
-| Neither set | **ADC path** — Definite-hosted ducklake/gcs extensions + `TYPE GCP, PROVIDER credential_chain` secret (uses GKE service account) |
+| Both `public_key` + `secret_key` set | **Legacy path** — Definite-hosted ducklake/postgres + `TYPE gcs` HMAC secret over httpfs |
+| Neither set | **ADC path** — Definite-hosted ducklake/postgres/gcs + `TYPE GCP, PROVIDER credential_chain` secret (uses GKE service account) |
 
 The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite stopped provisioning HMAC keys for new DuckLake integrations (2026-04-08). Key details:
 
-- Extensions are installed from `DEFINITE_EXTENSION_REPO` (`https://storage.googleapis.com/def-duckdb-extensions`) — the public httpfs-based ducklake doesn't support `TYPE GCP` secrets
-- `allow_unsigned_extensions` is enabled on the DuckDB connection for the Definite-hosted builds
+- Adds `INSTALL gcs FROM DEFINITE_EXTENSION_REPO` on top of the always-installed ducklake/postgres — the public httpfs-based ducklake doesn't support `TYPE GCP` secrets
 - Data paths are rewritten from `gs://` to `gcss://` (required by the native `gcs` extension)
 - Mirrors the canonical pattern from defapi `integration_config.py:135-146`
 - Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
-- S3 and local storage paths are completely unchanged
+- S3 and local storage paths still install ducklake/postgres from `DEFINITE_EXTENSION_REPO` but otherwise behave like before
+
+### Why `SET GLOBAL` for `pg_pool_*` (not plain `SET`)
+
+The startup script uses `SET GLOBAL pg_pool_max_connections=64;` (and the other `pg_pool_*` options) instead of plain `SET`. This is required on `duckdb-postgres` builds older than [commit f81dd35](https://github.com/duckdb/duckdb-postgres/commit/f81dd35) (2026-04-20):
+
+- Before that fix, `pg_pool_*` options were registered with default (SESSION) scope. Plain `SET pg_pool_*` would only update the user's current DuckDB session.
+- DuckLake's internal child `Connection` that runs the postgres `ATTACH` does **not** inherit user-session settings — it reads pg_pool_* from the GLOBAL scope only.
+- Result: with plain `SET`, the postgres extension's connection pool is built using defaults (`pg_pool_max_connections=10`, no reaper thread), regardless of what the script asked for.
+
+`SET GLOBAL` writes to the global scope, so DuckLake's child connection sees the configured values when it builds the pool. We can switch back to plain `SET` once we're guaranteed to be on a post-f81dd35 build — until then, keep `GLOBAL`.
+
+### Startup script ordering (do not reorder)
+
+The shared lines emitted by `_common_setup_lines()` rely on a specific order that the SQL semantics enforce:
+
+1. `LOAD postgres;` — must come before any `SET ... pg_pool_*` statement, since the pg_pool_* options are registered by the postgres extension.
+2. `SET GLOBAL pg_pool_*` — must come before `ATTACH 'ducklake:postgres:...'`, because DuckLake's internal child connection that runs the ATTACH reads pg_pool_* once at attach time. Setting them afterward has no effect on the pool that's already been built.
+3. `ATTACH` is appended by the caller after `_common_setup_lines()` returns.
+
+If you ever reorder these — even for cosmetic reasons — the pg_pool_* config is silently dropped and the pool is built with defaults (no reaper, max=10). Tests check substring presence, not order, so they will not catch this.
 
 ## Branch Model: `main` vs `definite`
 
