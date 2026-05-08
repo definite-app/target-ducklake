@@ -100,6 +100,16 @@ The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite st
 - Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
 - S3 and local storage paths still install ducklake/postgres from `DEFINITE_EXTENSION_REPO` but otherwise behave like before
 
+### Why `SET GLOBAL` for `pg_pool_*` (not plain `SET`)
+
+The startup script uses `SET GLOBAL pg_pool_max_connections=64;` (and the other `pg_pool_*` options) instead of plain `SET`. This is required on `duckdb-postgres` builds older than [commit f81dd35](https://github.com/duckdb/duckdb-postgres/commit/f81dd35) (2026-04-20):
+
+- Before that fix, `pg_pool_*` options were registered with default (SESSION) scope. Plain `SET pg_pool_*` would only update the user's current DuckDB session.
+- DuckLake's internal child `Connection` that runs the postgres `ATTACH` does **not** inherit user-session settings — it reads pg_pool_* from the GLOBAL scope only.
+- Result: with plain `SET`, the postgres extension's connection pool is built using defaults (`pg_pool_max_connections=10`, no reaper thread), regardless of what the script asked for.
+
+`SET GLOBAL` writes to the global scope, so DuckLake's child connection sees the configured values when it builds the pool. We can switch back to plain `SET` once we're guaranteed to be on a post-f81dd35 build — until then, keep `GLOBAL`.
+
 ### Startup script ordering (do not reorder)
 
 The shared lines emitted by `_common_setup_lines()` rely on a specific order that the SQL semantics enforce:
