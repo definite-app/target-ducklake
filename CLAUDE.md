@@ -100,6 +100,16 @@ The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite st
 - Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
 - S3 and local storage paths still install ducklake/postgres from `DEFINITE_EXTENSION_REPO` but otherwise behave like before
 
+### Startup script ordering (do not reorder)
+
+The shared lines emitted by `_common_setup_lines()` rely on a specific order that the SQL semantics enforce:
+
+1. `LOAD postgres;` — must come before any `SET ... pg_pool_*` statement, since the pg_pool_* options are registered by the postgres extension.
+2. `SET GLOBAL pg_pool_*` — must come before `ATTACH 'ducklake:postgres:...'`, because DuckLake's internal child connection that runs the ATTACH reads pg_pool_* once at attach time. Setting them afterward has no effect on the pool that's already been built.
+3. `ATTACH` is appended by the caller after `_common_setup_lines()` returns.
+
+If you ever reorder these — even for cosmetic reasons — the pg_pool_* config is silently dropped and the pool is built with defaults (no reaper, max=10). Tests check substring presence, not order, so they will not catch this.
+
 ## Branch Model: `main` vs `definite`
 
 This repo has two long-lived branches:

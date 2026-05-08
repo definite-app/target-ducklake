@@ -220,6 +220,31 @@ class DuckLakeConnector(SQLConnector):
         )
         return f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
 
+    def _common_setup_lines(self) -> list[str]:
+        """Shared INSTALL + LOAD + pool settings used by every startup path.
+
+        SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20): before
+        that fix, pg_pool_* options register with default (SESSION) scope, so
+        plain SET only writes to the user's session — DuckLake's internal child
+        Connection that runs the postgres ATTACH won't see them and the pool is
+        built with defaults (no reaper, max=10).
+
+        REQUIRED ORDER: ``LOAD postgres`` → ``SET GLOBAL pg_pool_*`` → ``ATTACH``
+        (the caller appends ATTACH). Reordering silently breaks the pool config.
+        """
+        return [
+            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
+            f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
+            # Order matters below: LOAD postgres must precede SET GLOBAL pg_pool_*,
+            # and both must precede ATTACH (which the caller appends).
+            "LOAD postgres;",
+            "SET ducklake_max_retry_count=100;",
+            "SET GLOBAL pg_pool_max_connections=64;",
+            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
+            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
+            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
+        ]
+
     def _build_gcp_credential_chain_script(self) -> str:
         """Build startup script for GCS with Application Default Credentials.
 
@@ -234,30 +259,12 @@ class DuckLakeConnector(SQLConnector):
         script_parts = [
             "INSTALL httpfs;",
             f"INSTALL gcs FROM {DEFINITE_EXTENSION_REPO};",
-            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
-            f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
+            *self._common_setup_lines(),
             "LOAD httpfs;",
             "LOAD gcs;",
             "LOAD ducklake;",
-            "LOAD postgres;",
-            "SET ducklake_max_retry_count=100;",
-            # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):
-            # before that fix, pg_pool_* options register with default (SESSION)
-            # scope, so plain SET only writes to the user's session — DuckLake's
-            # internal child Connection that runs the postgres ATTACH won't see
-            # them and the pool is built with defaults (no reaper, max=10).
-            "SET GLOBAL pg_pool_max_connections=64;",
-            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
-            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
-            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
             self._build_attach_statement(data_path=data_path),
-            (
-                "CREATE SECRET ("
-                "TYPE GCP, "
-                "PROVIDER credential_chain, "
-                f"SCOPE '{data_path}'"
-                ");"
-            ),
+            f"CREATE SECRET (TYPE GCP, PROVIDER credential_chain, SCOPE '{data_path}');",
         ]
         return "\n".join(script_parts)
 
@@ -266,45 +273,22 @@ class DuckLakeConnector(SQLConnector):
         if self._use_definite_gcp_credential_chain():
             return self._build_gcp_credential_chain_script()
 
-        script_parts = [
-            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
-            f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
-            "LOAD postgres;",
-            "SET ducklake_max_retry_count=100;",
-            # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):
-            # before that fix, pg_pool_* options register with default (SESSION)
-            # scope, so plain SET only writes to the user's session — DuckLake's
-            # internal child Connection that runs the postgres ATTACH won't see
-            # them and the pool is built with defaults (no reaper, max=10).
-            "SET GLOBAL pg_pool_max_connections=64;",
-            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
-            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
-            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
-        ]
-
+        script_parts = self._common_setup_lines()
         script_parts.append(self._build_attach_statement())
 
-        # Add secrets for cloud storage if configured
         if self.public_key and self.secret_key:
             if self.storage_type == "GCS":
                 script_parts.append(
-                    f"CREATE SECRET ("
-                    f"TYPE gcs, "
-                    f"KEY_ID '{self.public_key}', "
-                    f"SECRET '{self.secret_key}'"
-                    ");"
+                    f"CREATE SECRET (TYPE gcs, KEY_ID '{self.public_key}', "
+                    f"SECRET '{self.secret_key}');"
                 )
             elif self.storage_type == "S3":
-                # For S3, region is required when using explicit credentials
-                secret_parts = [
-                    f"TYPE s3, KEY_ID '{self.public_key}'",
-                    f"SECRET '{self.secret_key}'",
-                    f"REGION '{self.region}'",  # Always include since we validate it's required
-                ]
-
-                script_parts.append("CREATE SECRET (" + ", ".join(secret_parts) + ");")
+                # region required for S3 (validated in _validate_config)
+                script_parts.append(
+                    f"CREATE SECRET (TYPE s3, KEY_ID '{self.public_key}', "
+                    f"SECRET '{self.secret_key}', REGION '{self.region}');"
+                )
         elif self.storage_type in ["GCS", "S3"]:
-            # Log info when cloud storage is configured but no auth is provided
             logger.info(
                 f"Storage type is {self.storage_type} but no authentication credentials provided. "
                 f"Will attempt to access storage without explicit authentication. "
