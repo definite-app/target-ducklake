@@ -112,13 +112,17 @@ The startup script uses `SET GLOBAL pg_pool_max_connections=64;` (and the other 
 
 ### Startup script ordering (do not reorder)
 
-The shared lines emitted by `_common_setup_lines()` rely on a specific order that the SQL semantics enforce:
+The shared lines emitted by `_common_setup_lines()` rely on a specific order that DuckDB's extension manager and the SQL semantics enforce:
 
-1. `LOAD postgres;` — must come before any `SET ... pg_pool_*` statement, since the pg_pool_* options are registered by the postgres extension.
-2. `SET GLOBAL pg_pool_*` — must come before `ATTACH 'ducklake:postgres:...'`, because DuckLake's internal child connection that runs the ATTACH reads pg_pool_* once at attach time. Setting them afterward has no effect on the pool that's already been built.
-3. `ATTACH` is appended by the caller after `_common_setup_lines()` returns.
+1. **`LOAD postgres;` (Definite fork) must come before the first `ATTACH` that references a postgres-typed catalog** — including the metadata `ATTACH 'postgres:...'` that DuckLake issues during catalog initialization. DuckDB's `ExtensionManager::BeginLoad` short-circuits on already-loaded extensions ([`extension_manager.cpp:73-110`](https://github.com/duckdb/duckdb/blob/main/src/main/extension_manager.cpp#L73-L110)), and `loaded_extensions_info` is keyed only by extension name (no repo/version). Once postgres is loaded, no later `LOAD postgres` or `INSTALL postgres FROM <other-repo>` swaps the in-memory binary — `INSTALL` only writes to disk ([`extension_install.cpp`](https://github.com/duckdb/duckdb/blob/main/src/main/extension/extension_install.cpp)). So the *first* postgres binary the manager registers is the one bound for the lifetime of that `DatabaseInstance`. If `ATTACH` triggers `TryAutoLoadExtension` first ([`database_manager.cpp:174-187`](https://github.com/duckdb/duckdb/blob/main/src/main/database_manager.cpp#L174-L187)), DuckDB may pull upstream postgres instead of our Definite build, and `META_ROLE` (which exists only on the Definite fork) silently stops working.
 
-If you ever reorder these — even for cosmetic reasons — the pg_pool_* config is silently dropped and the pool is built with defaults (no reaper, max=10). Tests check substring presence, not order, so they will not catch this.
+2. `LOAD postgres;` must come before any `SET ... pg_pool_*` statement — the pg_pool_* options are registered by the postgres extension and don't exist as settings until it's loaded.
+
+3. `SET GLOBAL pg_pool_*` must come before `ATTACH 'ducklake:postgres:...'` — DuckLake's internal child connection that runs the ATTACH reads pg_pool_* once at attach time. Setting them afterward has no effect on the pool that's already been built.
+
+4. `ATTACH` is appended by the caller after `_common_setup_lines()` returns.
+
+Net rule: **`LOAD postgres` first, before everything else that touches postgres state.** Tests check substring presence, not order, so reordering will pass CI and silently break META_ROLE and/or pg_pool_* in production. To recover from a wrong-binary load you have to create a fresh `DatabaseInstance` (close + reopen the connection) — there is no in-process swap.
 
 ## Branch Model: `main` vs `definite`
 
