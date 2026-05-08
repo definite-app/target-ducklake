@@ -99,6 +99,75 @@ The ADC path (`_use_definite_gcp_credential_chain()`) exists because Definite st
 - Implementation: `_build_gcp_credential_chain_script()` in `connector.py`, with shared `_build_attach_statement()` for the ATTACH logic
 - S3 and local storage paths are completely unchanged
 
+## Branch Model: `main` vs `definite`
+
+This repo has two long-lived branches:
+
+- **`main`** — public, general-purpose target-ducklake. External users depend on it.
+- **`definite`** — Definite-internal branch. Adds the GCS ADC path (`_use_definite_gcp_credential_chain`, `DEFINITE_EXTENSION_REPO`, `gcss://` URI rewrite) and the `meta_role` config. Tracks `main` as upstream.
+
+### Decision tree
+
+```text
+Is the change Definite-specific (touches Definite-only code, only useful to Definite)?
+├── YES → branch off `definite`, PR into `definite`. Done.
+└── NO (shared)
+    ├── 1. branch off `main`, PR into `main`, merge.
+    └── 2. then branch off `definite`, `git merge origin/main`, resolve conflicts
+           (keep BOTH the new shared change AND the Definite-only code), PR into `definite`.
+```
+
+### Scenario 1: Definite-only change
+
+```bash
+git checkout definite && git pull
+git checkout -b swang/some-definite-feature
+# edits + commit
+git push -u origin swang/some-definite-feature
+gh pr create --base definite --title "..." --body "..."
+```
+
+The critical flag is `--base definite`. The default is `main`, so it's easy to accidentally PR into the public branch.
+
+### Scenario 2: Shared change (both branches)
+
+**Part A — land on `main`:**
+
+```bash
+git checkout main && git pull
+git checkout -b swang/some-shared-fix
+# edits + commit
+git push -u origin swang/some-shared-fix
+gh pr create --base main --title "..." --body "..."
+# (review + merge via GitHub UI)
+```
+
+**Part B — sync into `definite`:**
+
+```bash
+git checkout definite && git pull
+git checkout -b sync/main-into-definite-YYYY-MM-DD
+git merge origin/main
+# resolve any conflicts, then:
+git push -u origin sync/main-into-definite-YYYY-MM-DD
+gh pr create --base definite --title "sync main into definite" --body "..."
+```
+
+### Conflict-resolution rules during sync
+
+When `git merge origin/main` hits a conflict during a Scenario 2 sync:
+
+- **Conflict in a Definite-specific block** (e.g., shared change touches `connector.py` near `_build_gcp_credential_chain_script`): resolve by hand, keeping BOTH the new shared change AND the Definite block. Do NOT `--ours` here — that drops the shared change.
+- **Conflict in a file with no Definite code**: just resolve the textual conflict normally.
+
+### Gotchas
+
+- **Always check `--base` on PRs.** A shared change PR'd into `definite` will never reach `main` and won't help upstream users.
+- **Do not `git merge -s ours origin/main` for Scenario 2 syncs.** That strategy was used exactly once, for the initial split (PR #66, where `main`'s removal commit had to be absorbed without re-applying the deletion). Using it for shared-change syncs would silently drop real shared changes.
+- **Sync promptly.** The longer `definite` lags `main`, the more conflicts pile up. Aim for same-day or weekly batched syncs.
+- **Do not squash-merge sync PRs.** Squashing destroys the merge-commit metadata git uses to recognize main↔definite as related, which makes the *next* sync conflict-heavy. Use "Create a merge commit" on sync PRs (regular feature PRs can squash).
+- **If a Definite-only commit later turns out useful upstream:** cherry-pick it onto a branch off `main`, PR into `main`, then sync as Scenario 2.
+
 ## Key Dependencies
 
 - `duckdb>=1.5.2,<1.6.0`, `singer-sdk~=0.46.4`, `pyarrow>=20.0.0`, `polars>=1.31.0`, `sqlalchemy>=2.0.41`
