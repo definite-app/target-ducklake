@@ -223,20 +223,16 @@ class DuckLakeConnector(SQLConnector):
     def _common_setup_lines(self) -> list[str]:
         """Shared INSTALL + LOAD + pool settings used by every startup path.
 
-        SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20): before
-        that fix, pg_pool_* options register with default (SESSION) scope, so
-        plain SET only writes to the user's session — DuckLake's internal child
-        Connection that runs the postgres ATTACH won't see them and the pool is
-        built with defaults (no reaper, max=10).
-
-        REQUIRED ORDER: ``LOAD postgres`` → ``SET GLOBAL pg_pool_*`` → ``ATTACH``
-        (the caller appends ATTACH). Reordering silently breaks the pool config.
+        Order is load-bearing: ``LOAD postgres`` (Definite fork) must come
+        before any ``ATTACH`` and before ``SET GLOBAL pg_pool_*``. See CLAUDE.md
+        "Startup script ordering" for the full rationale and source citations.
         """
         return [
             f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
             f"INSTALL postgres FROM {DEFINITE_EXTENSION_REPO};",
-            # Order matters below: LOAD postgres must precede SET GLOBAL pg_pool_*,
-            # and both must precede ATTACH (which the caller appends).
+            # LOAD postgres FIRST: first-loaded postgres binary is bound for the
+            # DatabaseInstance lifetime; later LOAD/INSTALL won't swap it. If we
+            # let ATTACH autoload upstream postgres instead, META_ROLE breaks.
             "LOAD postgres;",
             "SET ducklake_max_retry_count=100;",
             "SET GLOBAL pg_pool_max_connections=64;",
