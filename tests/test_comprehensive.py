@@ -759,101 +759,34 @@ class TestTruncateColumnNames:
             assert long_key not in sink.flatten_schema
             assert "a" * 63 in sink.flatten_schema
 
-class TestStartupScriptGCSCredentialChain:
-    """Verify GCS-without-HMAC mode installs Definite extensions and creates a GCP secret."""
+class TestStartupScriptGCS:
+    """Verify GCS HMAC startup script wiring."""
 
     def _make_connector(self, **overrides):
         config = {
             "catalog_url": "host:5432/db",
             "data_path": "gs://def-ducklake/team-abc",
             "storage_type": "GCS",
+            "public_key": "ak",
+            "secret_key": "sk",
         }
         config.update(overrides)
         return DuckLakeConnector(config=config)
 
-    def test_credential_chain_mode_when_no_hmac_keys(self):
-        """No HMAC keys -> install custom extensions + TYPE GCP credential_chain SECRET.
-
-        Also verifies the data path is rewritten from `gs://` to `gcss://` for both
-        the ATTACH and the SECRET scope: the native gcs extension (used by the
-        custom ducklake build) only resolves `gcss://` URIs.
-        """
+    def test_hmac_path(self):
+        """With HMAC keys, install public ducklake extension and create a TYPE gcs secret."""
         connector = self._make_connector()
         script = connector._build_startup_script()
 
-        assert "INSTALL gcs FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
-        assert "INSTALL ducklake FROM 'https://storage.googleapis.com/def-duckdb-extensions'" in script
-        assert "LOAD ducklake" in script
-        assert "TYPE GCP" in script
-        assert "PROVIDER credential_chain" in script
-        assert "SCOPE 'gcss://def-ducklake/team-abc'" in script
-        assert "DATA_PATH 'gcss://def-ducklake/team-abc'" in script
-        assert "DATA_PATH 'gs://" not in script  # must not leak the httpfs scheme
-        # Must NOT use the legacy HMAC pattern
-        assert "TYPE gcs," not in script
-        assert "KEY_ID" not in script
-
-    def test_legacy_hmac_path_unchanged_when_keys_present(self):
-        """With both HMAC keys, behavior matches the original path (no custom repo)."""
-        connector = self._make_connector(public_key="ak", secret_key="sk")
-        script = connector._build_startup_script()
-
         assert "INSTALL ducklake;" in script
-        assert "FROM 'https://storage.googleapis.com/def-duckdb-extensions'" not in script
         assert "TYPE gcs," in script
         assert "KEY_ID 'ak'" in script
-        assert "TYPE GCP" not in script
+        assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
 
-    def test_credential_chain_includes_meta_schema(self):
+    def test_includes_meta_schema(self):
         """META_SCHEMA should appear in the ATTACH statement when configured."""
         connector = self._make_connector(meta_schema="custom_meta")
         script = connector._build_startup_script()
 
         assert "META_SCHEMA 'custom_meta'" in script
-        assert "DATA_PATH 'gcss://def-ducklake/team-abc'" in script
-
-    def test_legacy_path_includes_meta_schema(self):
-        """META_SCHEMA should appear in the ATTACH statement on the legacy HMAC path."""
-        connector = self._make_connector(
-            public_key="ak", secret_key="sk", meta_schema="custom_meta"
-        )
-        script = connector._build_startup_script()
-
-        assert "META_SCHEMA 'custom_meta'" in script
         assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
-
-    def test_credential_chain_includes_meta_role_when_set(self):
-        """META_ROLE should appear in the ATTACH statement when configured."""
-        connector = self._make_connector(
-            meta_schema="custom_meta", meta_role="user_abc"
-        )
-        script = connector._build_startup_script()
-
-        assert "META_ROLE 'user_abc'" in script
-        assert "META_SCHEMA 'custom_meta'" in script
-        assert script.index("META_SCHEMA") < script.index("META_ROLE")
-
-    def test_credential_chain_omits_meta_role_when_unset(self):
-        """No META_ROLE clause unless the config explicitly provides one."""
-        connector = self._make_connector(meta_schema="custom_meta")
-        script = connector._build_startup_script()
-
-        assert "META_ROLE" not in script
-
-    def test_legacy_path_includes_meta_role_when_set(self):
-        """Legacy HMAC path also forwards META_ROLE through the ATTACH."""
-        connector = self._make_connector(
-            public_key="ak",
-            secret_key="sk",
-            meta_schema="custom_meta",
-            meta_role="user_abc",
-        )
-        script = connector._build_startup_script()
-
-        assert "META_ROLE 'user_abc'" in script
-        assert "DATA_PATH 'gs://def-ducklake/team-abc'" in script
-
-    def test_use_gcp_credential_chain_predicate(self):
-        assert self._make_connector()._use_definite_gcp_credential_chain() is True
-        assert self._make_connector(public_key="ak", secret_key="sk")._use_definite_gcp_credential_chain() is False
-        assert self._make_connector(storage_type="local", data_path="/tmp/x")._use_definite_gcp_credential_chain() is False

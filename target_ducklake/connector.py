@@ -16,14 +16,6 @@ logger = logging.getLogger(__name__)
 
 PARTITION_GRANULARITIES = ["year", "month", "day", "hour"]
 
-# Definite-hosted DuckDB extension repo.
-# Used when authenticating to GCS via Application Default Credentials
-# (credential_chain) instead of HMAC keys. The native `gcs` extension
-# from this repo + the matching `ducklake` extension are required
-# because the public httpfs-based ducklake build does not understand
-# `TYPE GCP` secrets.
-DEFINITE_EXTENSION_REPO = "'https://storage.googleapis.com/def-duckdb-extensions'"
-
 # Postgres error messages that indicate transient connectivity issues.
 # These surface as plain duckdb.Error (not IOException) when DuckLake's
 # internal snapshot query hits a dropped Postgres connection.
@@ -112,7 +104,6 @@ class DuckLakeConnector(SQLConnector):
         self._connection: duckdb.DuckDBPyConnection | None = None
         self.catalog_name = "ducklake_catalog"
         self.meta_schema = config.get("meta_schema")
-        self.meta_role = config.get("meta_role")
 
     def _validate_config(self) -> None:
         """Validate required configuration parameters."""
@@ -166,33 +157,11 @@ class DuckLakeConnector(SQLConnector):
             logger.info("DuckDB and DuckLake catalog connection created.")
         return self._connection
 
-    def _use_definite_gcp_credential_chain(self) -> bool:
-        """Return True when GCS is configured without explicit HMAC keys.
-
-        In this mode we install the Definite-hosted ducklake/gcs extensions
-        and create a `TYPE GCP` secret backed by Application Default
-        Credentials (e.g., the GKE service account on meltano workers).
-        """
-        return (
-            self.storage_type == "GCS"
-            and not self.public_key
-            and not self.secret_key
-        )
-
     def _create_connection(self) -> duckdb.DuckDBPyConnection:
         """Create and configure a new DuckDB connection."""
         try:
             logger.info("Creating DuckDB connection")
-            if self._use_definite_gcp_credential_chain():
-                # Required to install the unsigned, Definite-hosted ducklake/gcs builds.
-                conn = duckdb.connect(
-                    database=":memory:",
-                    config={"allow_unsigned_extensions": True},
-                )
-            else:
-                # Legacy path: don't pass `config` at all, so behavior is bit-identical
-                # to pre-PR for customers on the HMAC / S3 / local flows.
-                conn = duckdb.connect(database=":memory:")
+            conn = duckdb.connect(database=":memory:")
 
             # Execute startup script to configure DuckLake
             startup_script = self._build_startup_script()
@@ -204,7 +173,7 @@ class DuckLakeConnector(SQLConnector):
                 f"Failed to create DuckDB connection: {e}"
             ) from e
 
-    def _build_attach_statement(self, data_path: str | None = None) -> str:
+    def _build_attach_statement(self) -> str:
         """Build the ATTACH statement for the DuckLake catalog."""
         if self.catalog_type == "duckdb":
             logger.info(
@@ -213,65 +182,19 @@ class DuckLakeConnector(SQLConnector):
             return f"ATTACH 'ducklake:metadata.ducklake' AS {self.catalog_name};"
 
         attach_params = {
-            "DATA_PATH": f"'{data_path or self.data_path}'",
+            "DATA_PATH": f"'{self.data_path}'",
             "DATA_INLINING_ROW_LIMIT": 0,
         }
         if self.meta_schema:
             attach_params["META_SCHEMA"] = f"'{self.meta_schema}'"
-        if self.meta_role:
-            attach_params["META_ROLE"] = f"'{self.meta_role}'"
 
         params_str = ", ".join(
             f"{key} {value}" for key, value in attach_params.items()
         )
         return f"ATTACH 'ducklake:{self.catalog_type}:{self.catalog_url}' AS {self.catalog_name} ({params_str});"
 
-    def _build_gcp_credential_chain_script(self) -> str:
-        """Build startup script for GCS with Application Default Credentials.
-
-        Uses Definite-hosted ducklake/gcs extensions that support `TYPE GCP`
-        secrets and the `gcss://` URI scheme. The public httpfs-based ducklake
-        only understands `TYPE gcs` HMAC + `gs://`.
-        Mirrors defapi `integration_config.py:135-146`.
-        """
-        data_path = self.data_path or ""
-        if data_path.startswith("gs://"):
-            data_path = "gcss://" + data_path[len("gs://"):]
-        script_parts = [
-            "INSTALL httpfs;",
-            f"INSTALL gcs FROM {DEFINITE_EXTENSION_REPO};",
-            f"INSTALL ducklake FROM {DEFINITE_EXTENSION_REPO};",
-            "INSTALL postgres;",
-            "LOAD httpfs;",
-            "LOAD gcs;",
-            "LOAD ducklake;",
-            "LOAD postgres;",
-            "SET ducklake_max_retry_count=100;",
-            # SET GLOBAL is required on duckdb-postgres < f81dd35 (2026-04-20):
-            # before that fix, pg_pool_* options register with default (SESSION)
-            # scope, so plain SET only writes to the user's session — DuckLake's
-            # internal child Connection that runs the postgres ATTACH won't see
-            # them and the pool is built with defaults (no reaper, max=10).
-            "SET GLOBAL pg_pool_max_connections=64;",
-            "SET GLOBAL pg_pool_idle_timeout_millis=60000;",
-            "SET GLOBAL pg_pool_enable_reaper_thread=true;",
-            "SET GLOBAL pg_pool_enable_thread_local_cache=false;",
-            self._build_attach_statement(data_path=data_path),
-            (
-                "CREATE SECRET ("
-                "TYPE GCP, "
-                "PROVIDER credential_chain, "
-                f"SCOPE '{data_path}'"
-                ");"
-            ),
-        ]
-        return "\n".join(script_parts)
-
     def _build_startup_script(self) -> str:
         """Build the DuckDB startup script with extensions and attachments."""
-        if self._use_definite_gcp_credential_chain():
-            return self._build_gcp_credential_chain_script()
-
         script_parts = [
             "INSTALL ducklake;",
             "INSTALL postgres;",
